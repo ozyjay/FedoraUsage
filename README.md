@@ -9,7 +9,7 @@ machine.
 ## Install
 
 ```bash
-./scripts/install.sh
+pwsh -NoProfile -File ./scripts/install.ps1
 ```
 
 Then log out and back in, or restart GNOME Shell if your session supports it.
@@ -22,7 +22,7 @@ gnome-extensions enable memory-usage-widget@local
 ## Validate
 
 ```bash
-./scripts/test.sh
+pwsh -NoProfile -File ./scripts/test.ps1
 ```
 
 For live Shell logs while enabling or disabling the extension:
