@@ -1,6 +1,6 @@
 {
   "name": "Memory Usage Widget",
-  "description": "Show current RAM and swap usage in the GNOME top bar.",
+  "description": "Show current RAM, swap, and filesystem usage in the GNOME top bar.",
   "uuid": "memory-usage-widget@local",
   "shell-version": [
     "50"

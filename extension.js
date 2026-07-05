@@ -1,4 +1,5 @@
 import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
@@ -52,6 +53,39 @@ function _formatKib(kib) {
     return `${Math.round(kib / 1024)} MiB`;
 }
 
+function _readFilesystemUsage(path = '/') {
+    const file = Gio.File.new_for_path(path);
+    const info = file.query_filesystem_info(
+        [
+            Gio.FILE_ATTRIBUTE_FILESYSTEM_SIZE,
+            Gio.FILE_ATTRIBUTE_FILESYSTEM_FREE,
+        ].join(','),
+        null);
+
+    const total = info.get_attribute_uint64(Gio.FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+    const free = info.get_attribute_uint64(Gio.FILE_ATTRIBUTE_FILESYSTEM_FREE);
+    const used = Math.max(total - free, 0);
+    const usedPercent = total > 0 ? Math.round(used / total * 100) : 0;
+
+    return {
+        path,
+        total,
+        free,
+        used,
+        usedPercent,
+    };
+}
+
+function _formatBytes(bytes) {
+    const gib = 1024 * 1024 * 1024;
+    const mib = 1024 * 1024;
+
+    if (bytes >= gib)
+        return `${(bytes / gib).toFixed(1)} GiB`;
+
+    return `${Math.round(bytes / mib)} MiB`;
+}
+
 const MemoryUsageIndicator = GObject.registerClass(
 class MemoryUsageIndicator extends PanelMenu.Button {
     constructor() {
@@ -78,10 +112,16 @@ class MemoryUsageIndicator extends PanelMenu.Button {
             reactive: false,
             can_focus: false,
         });
+        this._filesystemItem = new PopupMenu.PopupMenuItem('Filesystem: --', {
+            reactive: false,
+            can_focus: false,
+        });
 
         this.menu.addMenuItem(this._ramItem);
         this.menu.addMenuItem(this._availableItem);
         this.menu.addMenuItem(this._swapItem);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this.menu.addMenuItem(this._filesystemItem);
 
         this._update();
         this._timeoutId = GLib.timeout_add_seconds(
@@ -104,6 +144,7 @@ class MemoryUsageIndicator extends PanelMenu.Button {
 
     _update() {
         let stats;
+        let filesystemStats = null;
 
         try {
             stats = _readMeminfo();
@@ -114,7 +155,13 @@ class MemoryUsageIndicator extends PanelMenu.Button {
             return;
         }
 
-        this._label.text = `Mem ${stats.usedPercent}%`;
+        try {
+            filesystemStats = _readFilesystemUsage('/');
+        } catch (error) {
+            console.error(`Memory Usage Widget: failed to read filesystem usage: ${error}`);
+        }
+
+        this._label.text = `Mem ${stats.usedPercent}% FS ${filesystemStats?.usedPercent ?? '--'}%`;
         this._ramItem.label.text = `RAM: ${_formatKib(stats.used)} / ${_formatKib(stats.total)} (${stats.usedPercent}%)`;
         this._availableItem.label.text = `Available: ${_formatKib(stats.available)}`;
 
@@ -125,9 +172,19 @@ class MemoryUsageIndicator extends PanelMenu.Button {
             this._swapItem.label.text = 'Swap: not configured';
         }
 
-        if (stats.usedPercent >= CRITICAL_THRESHOLD)
+        if (filesystemStats) {
+            this._filesystemItem.label.text =
+                `Filesystem /: ${_formatBytes(filesystemStats.used)} / ${_formatBytes(filesystemStats.total)} ` +
+                `(${filesystemStats.usedPercent}%)`;
+        } else {
+            this._filesystemItem.label.text = 'Filesystem /: unavailable';
+        }
+
+        const highestUsedPercent = Math.max(stats.usedPercent, filesystemStats?.usedPercent ?? 0);
+
+        if (highestUsedPercent >= CRITICAL_THRESHOLD)
             this._setLevelClass('critical');
-        else if (stats.usedPercent >= WARNING_THRESHOLD)
+        else if (highestUsedPercent >= WARNING_THRESHOLD)
             this._setLevelClass('warning');
         else
             this._setLevelClass('normal');

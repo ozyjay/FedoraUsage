@@ -1,7 +1,8 @@
 # Memory Usage Widget
 
-A small GNOME Shell extension for Fedora Workstation that shows RAM usage in the
-top bar and adds a dropdown with RAM and swap details.
+A small GNOME Shell extension for Fedora Workstation that shows RAM and root
+filesystem usage in the top bar and adds a dropdown with RAM, swap, and
+filesystem details.
 
 This project targets GNOME Shell 50, matching Fedora 44 Workstation on this
 machine.
@@ -34,6 +35,8 @@ journalctl --user -f /usr/bin/gnome-shell
 ## Behavior
 
 - Updates every 2 seconds.
-- Shows `Mem 42%` in the top bar.
+- Shows `Mem 42% FS 18%` in the top bar.
 - Uses `/proc/meminfo` and `MemAvailable` for RAM usage.
-- Shows warning color at 70% and critical color at 90%.
+- Uses GNOME filesystem stats for `/` usage.
+- Shows warning color at 70% and critical color at 90% for the highest memory
+  or filesystem usage value.
