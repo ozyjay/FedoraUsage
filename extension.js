@@ -13,7 +13,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 const UPDATE_INTERVAL_SECONDS = 2;
 const PANEL_MEMORY_LABEL = '▦';
 const PANEL_FILESYSTEM_LABEL = '🖴';
-const PANEL_TEMPERATURE_LABEL = '🔥';
+const PANEL_TEMPERATURE_NORMAL_LABEL = '🌡';
+const PANEL_TEMPERATURE_HIGH_LABEL = '🔥';
 const WARNING_THRESHOLD = 70;
 const CRITICAL_THRESHOLD = 90;
 const TEMPERATURE_WARNING_THRESHOLD_C = 75;
@@ -131,6 +132,86 @@ function _formatTemperature(temperature) {
     return `${Math.round(temperature)}°C`;
 }
 
+function _friendlySensorInfo(rawName) {
+    const normalisedName = rawName.toLowerCase();
+
+    if (normalisedName.includes('amdgpu') || normalisedName.includes('gpu'))
+        return {icon: '🎮', name: 'GPU'};
+
+    if (normalisedName.includes('k10temp') ||
+        normalisedName.includes('tctl') ||
+        normalisedName.match(/\bcpu\b/) ||
+        normalisedName.includes('cpu@') ||
+        normalisedName.includes('cpu_virtual'))
+        return {icon: '🧠', name: 'CPU'};
+
+    if (normalisedName.includes('nvme'))
+        return {icon: '💾', name: 'SSD'};
+
+    if (normalisedName.includes('mt7925') ||
+        normalisedName.includes('iwlwifi') ||
+        normalisedName.includes('wifi') ||
+        normalisedName.includes('wlan') ||
+        normalisedName.includes('phy'))
+        return {icon: '📶', name: 'Wi-Fi'};
+
+    if (normalisedName.includes('r8169') ||
+        normalisedName.includes('ethernet') ||
+        normalisedName.includes(' lan'))
+        return {icon: '🌐', name: 'Ethernet'};
+
+    if (normalisedName.includes('memory'))
+        return {icon: '🧩', name: 'Memory'};
+
+    if (normalisedName.includes('power'))
+        return {icon: '🔌', name: 'Power'};
+
+    if (normalisedName.includes('ambient'))
+        return {icon: '🌡', name: 'Ambient'};
+
+    if (normalisedName.includes('mainboard') || normalisedName.includes('cros_ec'))
+        return {icon: '🧱', name: 'Mainboard'};
+
+    if (normalisedName.includes('acpitz') || normalisedName.includes('thermal_zone'))
+        return {icon: '🌡', name: 'System'};
+
+    return {
+        icon: '🌡',
+        name: rawName
+            .replace(/_/g, ' ')
+            .replace(/@[0-9a-f]+/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim(),
+    };
+}
+
+function _applyFriendlySensorNames(sensors) {
+    const totals = new Map();
+    const indexes = new Map();
+
+    for (const sensor of sensors) {
+        const friendly = _friendlySensorInfo(sensor.name);
+        const key = `${friendly.icon} ${friendly.name}`;
+
+        sensor.friendlyIcon = friendly.icon;
+        sensor.friendlyName = friendly.name;
+        sensor.friendlyKey = key;
+        totals.set(key, (totals.get(key) ?? 0) + 1);
+    }
+
+    for (const sensor of sensors) {
+        const count = (indexes.get(sensor.friendlyKey) ?? 0) + 1;
+        const hasDuplicates = (totals.get(sensor.friendlyKey) ?? 0) > 1;
+        const suffix = hasDuplicates ? ` ${count}` : '';
+
+        indexes.set(sensor.friendlyKey, count);
+        sensor.displayName = `${sensor.friendlyIcon} ${sensor.friendlyName}${suffix}`;
+        sensor.panelName = `${sensor.friendlyName}${suffix}`;
+    }
+
+    return sensors;
+}
+
 function _formatPanelSensorName(name) {
     const maxLength = 14;
 
@@ -141,7 +222,7 @@ function _formatPanelSensorName(name) {
 }
 
 function _formatPanelTemperature(sensor) {
-    return `${_formatPanelSensorName(sensor.name)} ${_formatTemperature(sensor.temperature)}`;
+    return `${_formatPanelSensorName(sensor.panelName)} ${_formatTemperature(sensor.temperature)}`;
 }
 
 function _readHwmonTemperatureSensors() {
@@ -224,6 +305,7 @@ function _readTemperatureStats() {
     }
 
     sensors.sort((left, right) => right.temperature - left.temperature);
+    sensors = _applyFriendlySensorNames(sensors);
 
     return {
         available: sensors.length > 0,
@@ -320,7 +402,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
 
         this._temperatureIconLabel = new St.Label({
             style_class: 'fedora-usage-label fedora-usage-icon',
-            text: PANEL_TEMPERATURE_LABEL,
+            text: PANEL_TEMPERATURE_NORMAL_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._temperatureLabel = new St.Label({
@@ -414,6 +496,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         } catch (error) {
             console.error(`FedoraUsage: failed to read /proc/meminfo: ${error}`);
             this._memoryPercentLabel.text = '--%';
+            this._temperatureIconLabel.text = PANEL_TEMPERATURE_NORMAL_LABEL;
             this._temperatureLabel.text = '--°C';
             this._temperatureItem.label.text = 'Hottest: unavailable';
             this._setTemperatureSensorItems([]);
@@ -445,11 +528,16 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         }
 
         if (temperatureStats.available) {
+            this._temperatureIconLabel.text =
+                temperatureStats.hottest.temperature >= TEMPERATURE_WARNING_THRESHOLD_C
+                    ? PANEL_TEMPERATURE_HIGH_LABEL
+                    : PANEL_TEMPERATURE_NORMAL_LABEL;
             this._temperatureLabel.text = _formatPanelTemperature(temperatureStats.hottest);
             this._temperatureItem.label.text =
-                `Hottest: ${temperatureStats.hottest.name} ` +
+                `Hottest: ${temperatureStats.hottest.displayName} ` +
                 `${_formatTemperature(temperatureStats.hottest.temperature)}`;
         } else {
+            this._temperatureIconLabel.text = PANEL_TEMPERATURE_NORMAL_LABEL;
             this._temperatureLabel.text = '--°C';
             this._temperatureItem.label.text = 'Hottest: unavailable';
         }
@@ -511,7 +599,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         } else {
             this._temperatureSensorItems = otherSensors.map(sensor =>
                 new PopupMenu.PopupMenuItem(
-                    `${sensor.name}: ${_formatTemperature(sensor.temperature)}`,
+                    `${sensor.displayName}: ${_formatTemperature(sensor.temperature)}`,
                     {
                         reactive: false,
                         can_focus: false,
