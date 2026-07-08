@@ -43,8 +43,9 @@ journalctl --user -f /usr/bin/gnome-shell
   fallback. The top bar shows a simplified hottest sensor name and reading, and
   the dropdown names the hottest sensor separately from a collapsible list of
   other detected sensor readings. Raw sensor names such as `k10temp Tctl`,
-  `amdgpu edge`, and `mt7925_phy0` are simplified to labels such as `🧠 CPU`,
-  `🎮 GPU`, and `📶 Wi-Fi`.
+  `amdgpu edge`, `nvme Composite`, `mt7925_phy0`, `r8169_0_bf00:00`, and
+  ChromeOS EC labels are simplified to labels such as `🧠 CPU`, `🎮 GPU`,
+  `💾 SSD Composite`, `📶 Wi-Fi`, `🌐 Ethernet`, and `🧱 Mainboard power`.
 - Uses GNOME filesystem stats for `/` and the mounted `Work` SSD.
 - Looks for the `Work` SSD at common mount points such as
   `/run/media/$USER/Work` and `/mnt/Work`; if it is not mounted, the top bar

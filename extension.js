@@ -138,12 +138,23 @@ function _friendlySensorInfo(rawName) {
     if (normalisedName.includes('amdgpu') || normalisedName.includes('gpu'))
         return {icon: '🎮', name: 'GPU'};
 
+    if (normalisedName.includes('cpu_virtual'))
+        return {icon: '🧠', name: 'CPU virtual'};
+
     if (normalisedName.includes('k10temp') ||
         normalisedName.includes('tctl') ||
         normalisedName.match(/\bcpu\b/) ||
-        normalisedName.includes('cpu@') ||
-        normalisedName.includes('cpu_virtual'))
+        normalisedName.includes('cpu@'))
         return {icon: '🧠', name: 'CPU'};
+
+    if (normalisedName.includes('nvme composite'))
+        return {icon: '💾', name: 'SSD Composite'};
+
+    if (normalisedName.match(/nvme sensor\s+\d+/)) {
+        const sensorNumber = normalisedName.match(/sensor\s+(\d+)/)?.[1] ?? '';
+
+        return {icon: '💾', name: `SSD Sensor ${sensorNumber}`.trim()};
+    }
 
     if (normalisedName.includes('nvme'))
         return {icon: '💾', name: 'SSD'};
@@ -160,6 +171,15 @@ function _friendlySensorInfo(rawName) {
         normalisedName.includes(' lan'))
         return {icon: '🌐', name: 'Ethernet'};
 
+    if (normalisedName.includes('mainboard_power'))
+        return {icon: '🧱', name: 'Mainboard power'};
+
+    if (normalisedName.includes('mainboard_memory'))
+        return {icon: '🧩', name: 'Mainboard memory'};
+
+    if (normalisedName.includes('mainboard_ambient'))
+        return {icon: '🌡', name: 'Mainboard ambient'};
+
     if (normalisedName.includes('memory'))
         return {icon: '🧩', name: 'Memory'};
 
@@ -173,7 +193,7 @@ function _friendlySensorInfo(rawName) {
         return {icon: '🧱', name: 'Mainboard'};
 
     if (normalisedName.includes('acpitz') || normalisedName.includes('thermal_zone'))
-        return {icon: '🌡', name: 'System'};
+        return {icon: '🌡', name: 'ACPI/System'};
 
     return {
         icon: '🌡',
@@ -436,10 +456,6 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             reactive: false,
             can_focus: false,
         });
-        this._availableItem = new PopupMenu.PopupMenuItem('Available: --', {
-            reactive: false,
-            can_focus: false,
-        });
         this._swapItem = new PopupMenu.PopupMenuItem('Swap: --', {
             reactive: false,
             can_focus: false,
@@ -459,7 +475,6 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             }));
 
         this.menu.addMenuItem(this._ramItem);
-        this.menu.addMenuItem(this._availableItem);
         this.menu.addMenuItem(this._swapItem);
         this.menu.addMenuItem(this._temperatureItem);
         this.menu.addMenuItem(this._temperatureSensorsSubMenu);
@@ -518,7 +533,6 @@ class FedoraUsageIndicator extends PanelMenu.Button {
 
         this._memoryPercentLabel.text = `${stats.usedPercent}%`;
         this._ramItem.label.text = `RAM: ${_formatKib(stats.used)} / ${_formatKib(stats.total)} (${stats.usedPercent}%)`;
-        this._availableItem.label.text = `Available: ${_formatKib(stats.available)}`;
 
         if (stats.swapTotal > 0) {
             this._swapItem.label.text =
