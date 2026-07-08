@@ -39,7 +39,8 @@ journalctl --user -f /usr/bin/gnome-shell
 - Uses a smaller mini-font style for the top-bar percentage numbers.
 - Uses `/proc/meminfo` and `MemAvailable` for RAM usage.
 - Uses Linux `hwmon` temperature sensors, with `thermal_zone` sensors as a
-  fallback.
+  fallback. The top bar shows the hottest reading, and the dropdown names the
+  hottest sensor plus all detected sensor readings.
 - Uses GNOME filesystem stats for `/` and the mounted `Work` SSD.
 - Looks for the `Work` SSD at common mount points such as
   `/run/media/$USER/Work` and `/mnt/Work`; if it is not mounted, the top bar

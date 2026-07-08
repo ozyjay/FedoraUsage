@@ -349,10 +349,12 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             reactive: false,
             can_focus: false,
         });
-        this._temperatureItem = new PopupMenu.PopupMenuItem('Temperature: --', {
+        this._temperatureItem = new PopupMenu.PopupMenuItem('Hottest: --', {
             reactive: false,
             can_focus: false,
         });
+        this._temperatureSensorItems = [];
+        this._temperatureSensorSeparator = new PopupMenu.PopupSeparatorMenuItem();
         this._storageItems = STORAGE_FILESYSTEMS.map(storage =>
             new PopupMenu.PopupMenuItem(`${storage.name}: --`, {
                 reactive: false,
@@ -363,7 +365,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._availableItem);
         this.menu.addMenuItem(this._swapItem);
         this.menu.addMenuItem(this._temperatureItem);
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this.menu.addMenuItem(this._temperatureSensorSeparator);
         for (const item of this._storageItems)
             this.menu.addMenuItem(item);
 
@@ -397,6 +399,8 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             console.error(`FedoraUsage: failed to read /proc/meminfo: ${error}`);
             this._memoryPercentLabel.text = '--%';
             this._temperatureLabel.text = '--°C';
+            this._temperatureItem.label.text = 'Hottest: unavailable';
+            this._setTemperatureSensorItems([]);
             for (const label of this._storagePercentLabels)
                 label.text = '--%';
             this._setLevelClass('unknown');
@@ -427,12 +431,14 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         if (temperatureStats.available) {
             this._temperatureLabel.text = _formatTemperature(temperatureStats.hottest.temperature);
             this._temperatureItem.label.text =
-                `Temperature: ${_formatTemperature(temperatureStats.hottest.temperature)} ` +
-                `(${temperatureStats.hottest.name})`;
+                `Hottest: ${temperatureStats.hottest.name} ` +
+                `${_formatTemperature(temperatureStats.hottest.temperature)}`;
         } else {
             this._temperatureLabel.text = '--°C';
-            this._temperatureItem.label.text = 'Temperature: unavailable';
+            this._temperatureItem.label.text = 'Hottest: unavailable';
         }
+
+        this._setTemperatureSensorItems(temperatureStats.sensors);
 
         storageStats.forEach((storage, index) => {
             if (storage.mounted) {
@@ -465,6 +471,22 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             this._setLevelClass('warning');
         else
             this._setLevelClass('normal');
+    }
+
+    _setTemperatureSensorItems(sensors) {
+        for (const item of this._temperatureSensorItems)
+            item.destroy();
+
+        this._temperatureSensorItems = sensors.map(sensor =>
+            new PopupMenu.PopupMenuItem(
+                `  ${sensor.name}: ${_formatTemperature(sensor.temperature)}`,
+                {
+                    reactive: false,
+                    can_focus: false,
+                }));
+
+        this._temperatureSensorItems.forEach((item, index) =>
+            this.menu.addMenuItem(item, 4 + index));
     }
 
     _setLevelClass(level) {
