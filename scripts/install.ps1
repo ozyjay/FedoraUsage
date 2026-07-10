@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$Uuid = 'FedoraUsage@local'
+$Uuid = 'system-usage@crunchycodes.net'
 $SourceDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $TargetDir = Join-Path $HOME ".local/share/gnome-shell/extensions/$Uuid"
 

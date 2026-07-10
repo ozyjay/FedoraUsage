@@ -1,9 +1,10 @@
 {
-  "name": "FedoraUsage",
-  "description": "Show current RAM, swap, temperature, fan speed, and filesystem usage in the GNOME top bar.",
-  "uuid": "FedoraUsage@local",
+  "name": "System Usage Monitor",
+  "description": "Monitor RAM, swap, temperatures, active fan speed, and system storage from the GNOME top bar. Built for Framework Desktop and compatible with Fedora 44 Workstation.",
+  "uuid": "system-usage@crunchycodes.net",
   "shell-version": [
     "50"
   ],
+  "url": "https://github.com/ozyjay/FedoraUsage",
   "version-name": "1.0.0"
 }

@@ -1,10 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
-$Uuid = 'FedoraUsage@local'
+$Uuid = 'system-usage@crunchycodes.net'
 $SourceDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $TargetDir = Join-Path $HOME ".local/share/gnome-shell/extensions/$Uuid"
 $TempRoot = if ($env:TMPDIR) { $env:TMPDIR } else { '/tmp' }
-$PackDir = Join-Path $TempRoot 'FedoraUsage-test'
+$PackDir = Join-Path $TempRoot 'system-usage-test'
 
 if (Get-Command jq -ErrorAction SilentlyContinue) {
     & jq empty (Join-Path $SourceDir 'metadata.json') | Out-Null

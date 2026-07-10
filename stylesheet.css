@@ -1,33 +1,35 @@
-.fedora-usage-panel {
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+.system-usage-panel {
   spacing: 0.25em;
 }
 
-.fedora-usage-label {
+.system-usage-label {
   text-align: center;
 }
 
-.fedora-usage-icon {
+.system-usage-icon {
   min-width: 1.2em;
 }
 
-.fedora-usage-number.mini-font {
+.system-usage-number.mini-font {
   font-size: 0.82em;
   font-weight: 600;
   min-width: 2.5em;
 }
 
-.fedora-usage-normal .fedora-usage-label {
+.system-usage-normal .system-usage-label {
   color: #ffffff;
 }
 
-.fedora-usage-warning .fedora-usage-label {
+.system-usage-warning .system-usage-label {
   color: #f8e45c;
 }
 
-.fedora-usage-critical .fedora-usage-label {
+.system-usage-critical .system-usage-label {
   color: #ff7b63;
 }
 
-.fedora-usage-unknown .fedora-usage-label {
+.system-usage-unknown .system-usage-label {
   color: #c0bfbc;
 }

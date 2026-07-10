@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -21,27 +23,10 @@ const CRITICAL_THRESHOLD = 90;
 const TEMPERATURE_WARNING_THRESHOLD_C = 75;
 const TEMPERATURE_CRITICAL_THRESHOLD_C = 90;
 
-function _workSsdPaths() {
-    const userName = GLib.get_user_name();
-
-    return [
-        `/run/media/${userName}/Work`,
-        `/media/${userName}/Work`,
-        '/mnt/Work',
-        '/mnt/work',
-        '/media/Work',
-        '/work',
-    ];
-}
-
 const STORAGE_FILESYSTEMS = [
     {
-        name: 'Fedora SSD',
+        name: 'System filesystem',
         paths: ['/'],
-    },
-    {
-        name: 'Work SSD',
-        paths: _workSsdPaths(),
     },
 ];
 
@@ -318,14 +303,14 @@ function _readTemperatureStats() {
     try {
         sensors = _readHwmonTemperatureSensors();
     } catch (error) {
-        console.error(`FedoraUsage: failed to read hwmon temperature sensors: ${error}`);
+        console.error(`System Usage Monitor: failed to read hwmon temperature sensors: ${error}`);
     }
 
     if (sensors.length === 0) {
         try {
             sensors = _readThermalZoneTemperatureSensors();
         } catch (error) {
-            console.error(`FedoraUsage: failed to read thermal zone temperature sensors: ${error}`);
+            console.error(`System Usage Monitor: failed to read thermal zone temperature sensors: ${error}`);
         }
     }
 
@@ -375,7 +360,7 @@ function _readFanStats() {
             }
         }
     } catch (error) {
-        console.error(`FedoraUsage: failed to read hwmon fan sensors: ${error}`);
+        console.error(`System Usage Monitor: failed to read hwmon fan sensors: ${error}`);
     }
 
     fans.sort((left, right) =>
@@ -448,26 +433,26 @@ function _formatBytes(bytes) {
     return `${Math.round(bytes / mib)} MiB`;
 }
 
-const FedoraUsageIndicator = GObject.registerClass(
-class FedoraUsageIndicator extends PanelMenu.Button {
+const SystemUsageIndicator = GObject.registerClass(
+class SystemUsageIndicator extends PanelMenu.Button {
     constructor() {
-        super(0.0, 'FedoraUsage');
+        super(0.0, 'System Usage Monitor');
 
         this._timeoutId = 0;
 
         this._panelBox = new St.BoxLayout({
-            style_class: 'fedora-usage-panel',
+            style_class: 'system-usage-panel',
             y_align: Clutter.ActorAlign.CENTER,
         });
         this.add_child(this._panelBox);
 
         this._memoryIconLabel = new St.Label({
-            style_class: 'fedora-usage-label fedora-usage-icon',
+            style_class: 'system-usage-label system-usage-icon',
             text: PANEL_MEMORY_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._memoryPercentLabel = new St.Label({
-            style_class: 'fedora-usage-label fedora-usage-number mini-font',
+            style_class: 'system-usage-label system-usage-number mini-font',
             text: '--%',
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -476,12 +461,12 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         this._panelBox.add_child(this._memoryPercentLabel);
 
         this._temperatureIconLabel = new St.Label({
-            style_class: 'fedora-usage-label fedora-usage-icon',
+            style_class: 'system-usage-label system-usage-icon',
             text: PANEL_TEMPERATURE_NORMAL_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._temperatureLabel = new St.Label({
-            style_class: 'fedora-usage-label fedora-usage-number mini-font',
+            style_class: 'system-usage-label system-usage-number mini-font',
             text: '--°C',
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -490,13 +475,13 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         this._panelBox.add_child(this._temperatureLabel);
 
         this._fanIconLabel = new St.Label({
-            style_class: 'fedora-usage-label fedora-usage-icon',
+            style_class: 'system-usage-label system-usage-icon',
             text: PANEL_FAN_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
             visible: false,
         });
         this._fanSpeedLabel = new St.Label({
-            style_class: 'fedora-usage-label fedora-usage-number mini-font',
+            style_class: 'system-usage-label system-usage-number mini-font',
             text: '',
             y_align: Clutter.ActorAlign.CENTER,
             visible: false,
@@ -507,12 +492,12 @@ class FedoraUsageIndicator extends PanelMenu.Button {
 
         this._storagePercentLabels = STORAGE_FILESYSTEMS.map(() => {
             const iconLabel = new St.Label({
-                style_class: 'fedora-usage-label fedora-usage-icon',
+                style_class: 'system-usage-label system-usage-icon',
                 text: PANEL_FILESYSTEM_LABEL,
                 y_align: Clutter.ActorAlign.CENTER,
             });
             const percentLabel = new St.Label({
-                style_class: 'fedora-usage-label fedora-usage-number mini-font',
+                style_class: 'system-usage-label system-usage-number mini-font',
                 text: '--%',
                 y_align: Clutter.ActorAlign.CENTER,
             });
@@ -591,7 +576,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         try {
             stats = _readMeminfo();
         } catch (error) {
-            console.error(`FedoraUsage: failed to read /proc/meminfo: ${error}`);
+            console.error(`System Usage Monitor: failed to read /proc/meminfo: ${error}`);
             this._memoryPercentLabel.text = '--%';
             this._temperatureIconLabel.text = PANEL_TEMPERATURE_NORMAL_LABEL;
             this._temperatureLabel.text = '--°C';
@@ -610,7 +595,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             const usage = _readStorageUsage(storage);
 
             if (usage.error)
-                console.error(`FedoraUsage: failed to read ${storage.name} usage: ${usage.error}`);
+                console.error(`System Usage Monitor: failed to read ${storage.name} usage: ${usage.error}`);
 
             return usage;
         });
@@ -739,16 +724,16 @@ class FedoraUsageIndicator extends PanelMenu.Button {
 
     _setLevelClass(level) {
         for (const name of ['normal', 'warning', 'critical', 'unknown'])
-            this.remove_style_class_name(`fedora-usage-${name}`);
+            this.remove_style_class_name(`system-usage-${name}`);
 
-        this.add_style_class_name(`fedora-usage-${level}`);
+        this.add_style_class_name(`system-usage-${level}`);
     }
 });
 
-export default class FedoraUsageExtension extends Extension {
+export default class SystemUsageExtension extends Extension {
     enable() {
-        this._indicator = new FedoraUsageIndicator();
-        Main.panel.addToStatusArea('FedoraUsage', this._indicator, 0, 'right');
+        this._indicator = new SystemUsageIndicator();
+        Main.panel.addToStatusArea('system-usage', this._indicator, 0, 'right');
     }
 
     disable() {
