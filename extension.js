@@ -13,6 +13,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 const UPDATE_INTERVAL_SECONDS = 2;
 const PANEL_MEMORY_LABEL = '▦';
 const PANEL_FILESYSTEM_LABEL = '🖴';
+const PANEL_FAN_LABEL = '🌀';
 const PANEL_TEMPERATURE_NORMAL_LABEL = '🌡';
 const PANEL_TEMPERATURE_HIGH_LABEL = '🔥';
 const WARNING_THRESHOLD = 70;
@@ -130,6 +131,10 @@ function _parseMillidegreeTemperature(rawText) {
 
 function _formatTemperature(temperature) {
     return `${Math.round(temperature)}°C`;
+}
+
+function _formatFanSpeed(speed) {
+    return `${speed} RPM`;
 }
 
 function _friendlySensorInfo(rawName) {
@@ -334,6 +339,56 @@ function _readTemperatureStats() {
     };
 }
 
+function _readFanStats() {
+    const fans = [];
+
+    try {
+        for (const directoryName of _listDirectoryNames('/sys/class/hwmon')) {
+            if (!directoryName.startsWith('hwmon'))
+                continue;
+
+            const basePath = `/sys/class/hwmon/${directoryName}`;
+            const deviceName = _readOptionalTextFile(`${basePath}/name`) ?? directoryName;
+
+            for (const fileName of _listDirectoryNames(basePath)) {
+                const match = fileName.match(/^fan(\d+)_input$/);
+
+                if (!match)
+                    continue;
+
+                const speed = Number.parseInt(
+                    _readOptionalTextFile(`${basePath}/${fileName}`) ?? '', 10);
+
+                // Stopped fans are deliberately omitted from both the panel and menu.
+                if (!Number.isFinite(speed) || speed <= 0)
+                    continue;
+
+                const number = Number.parseInt(match[1], 10);
+                const label = _readOptionalTextFile(`${basePath}/fan${number}_label`);
+
+                fans.push({
+                    deviceName,
+                    number,
+                    name: label || `Fan ${number}`,
+                    speed,
+                });
+            }
+        }
+    } catch (error) {
+        console.error(`FedoraUsage: failed to read hwmon fan sensors: ${error}`);
+    }
+
+    fans.sort((left, right) =>
+        left.number - right.number || left.deviceName.localeCompare(right.deviceName));
+
+    const fanOne = fans.find(fan => fan.number === 1) ?? null;
+
+    return {
+        fanOne,
+        otherFans: fans.filter(fan => fan !== fanOne),
+    };
+}
+
 function _readFilesystemUsage(path = '/') {
     const file = Gio.File.new_for_path(path);
     const info = file.query_filesystem_info(
@@ -434,6 +489,22 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         this._panelBox.add_child(this._temperatureIconLabel);
         this._panelBox.add_child(this._temperatureLabel);
 
+        this._fanIconLabel = new St.Label({
+            style_class: 'fedora-usage-label fedora-usage-icon',
+            text: PANEL_FAN_LABEL,
+            y_align: Clutter.ActorAlign.CENTER,
+            visible: false,
+        });
+        this._fanSpeedLabel = new St.Label({
+            style_class: 'fedora-usage-label fedora-usage-number mini-font',
+            text: '',
+            y_align: Clutter.ActorAlign.CENTER,
+            visible: false,
+        });
+
+        this._panelBox.add_child(this._fanIconLabel);
+        this._panelBox.add_child(this._fanSpeedLabel);
+
         this._storagePercentLabels = STORAGE_FILESYSTEMS.map(() => {
             const iconLabel = new St.Label({
                 style_class: 'fedora-usage-label fedora-usage-icon',
@@ -468,6 +539,14 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             new PopupMenu.PopupSubMenuMenuItem('Other temperature sensors');
         this._temperatureSensorItems = [];
         this._temperatureSensorSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this._fanItem = new PopupMenu.PopupMenuItem('Fan 1: --', {
+            reactive: false,
+            can_focus: false,
+        });
+        this._fanItem.visible = false;
+        this._otherFansSubMenu = new PopupMenu.PopupSubMenuMenuItem('Other fans');
+        this._otherFansSubMenu.visible = false;
+        this._otherFanItems = [];
         this._storageItems = STORAGE_FILESYSTEMS.map(storage =>
             new PopupMenu.PopupMenuItem(`${storage.name}: --`, {
                 reactive: false,
@@ -479,6 +558,8 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._temperatureItem);
         this.menu.addMenuItem(this._temperatureSensorsSubMenu);
         this.menu.addMenuItem(this._temperatureSensorSeparator);
+        this.menu.addMenuItem(this._fanItem);
+        this.menu.addMenuItem(this._otherFansSubMenu);
         for (const item of this._storageItems)
             this.menu.addMenuItem(item);
 
@@ -504,6 +585,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
     _update() {
         let stats;
         let temperatureStats;
+        let fanStats;
         let storageStats = [];
 
         try {
@@ -515,6 +597,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
             this._temperatureLabel.text = '--°C';
             this._temperatureItem.label.text = 'Hottest: unavailable';
             this._setTemperatureSensorItems([]);
+            this._setFanItems({fanOne: null, otherFans: []});
             for (const label of this._storagePercentLabels)
                 label.text = '--%';
             this._setLevelClass('unknown');
@@ -522,6 +605,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         }
 
         temperatureStats = _readTemperatureStats();
+        fanStats = _readFanStats();
         storageStats = STORAGE_FILESYSTEMS.map(storage => {
             const usage = _readStorageUsage(storage);
 
@@ -557,6 +641,7 @@ class FedoraUsageIndicator extends PanelMenu.Button {
         }
 
         this._setTemperatureSensorItems(temperatureStats.sensors, temperatureStats.hottest);
+        this._setFanItems(fanStats);
 
         storageStats.forEach((storage, index) => {
             if (storage.mounted) {
@@ -622,6 +707,34 @@ class FedoraUsageIndicator extends PanelMenu.Button {
 
         this._temperatureSensorItems.forEach(item =>
             this._temperatureSensorsSubMenu.menu.addMenuItem(item));
+    }
+
+    _setFanItems({fanOne, otherFans}) {
+        const showFanOne = fanOne !== null;
+
+        this._fanIconLabel.visible = showFanOne;
+        this._fanSpeedLabel.visible = showFanOne;
+        this._fanItem.visible = showFanOne;
+        this._fanSpeedLabel.text = showFanOne ? _formatFanSpeed(fanOne.speed) : '';
+
+        if (showFanOne)
+            this._fanItem.label.text = `${fanOne.name}: ${_formatFanSpeed(fanOne.speed)}`;
+
+        for (const item of this._otherFanItems)
+            item.destroy();
+
+        this._otherFanItems = otherFans.map(fan =>
+            new PopupMenu.PopupMenuItem(
+                `${fan.name}: ${_formatFanSpeed(fan.speed)}`,
+                {
+                    reactive: false,
+                    can_focus: false,
+                }));
+
+        this._otherFansSubMenu.visible = this._otherFanItems.length > 0;
+        this._otherFansSubMenu.label.text = `Other fans (${this._otherFanItems.length})`;
+        this._otherFanItems.forEach(item =>
+            this._otherFansSubMenu.menu.addMenuItem(item));
     }
 
     _setLevelClass(level) {

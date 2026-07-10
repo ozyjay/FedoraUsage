@@ -1,8 +1,9 @@
 # FedoraUsage
 
 A small GNOME Shell extension for Fedora Workstation that shows RAM,
-temperature, and the Fedora and Work SSD usage in the top bar, and adds a
-dropdown with RAM, swap, temperature, and SSD details.
+temperature, active Fan 1 speed, and the Fedora and Work SSD usage in the top
+bar, and adds a dropdown with RAM, swap, temperature, active fan, and SSD
+details.
 
 This project targets GNOME Shell 50, matching Fedora 44 Workstation on this
 machine.
@@ -35,8 +36,9 @@ journalctl --user -f /usr/bin/gnome-shell
 ## Behavior
 
 - Updates every 2 seconds.
-- Shows `▦ 42% 🌡 CPU 50°C 🖴 18% 🖴 --%` in the top bar, switching the
-  temperature icon to `🔥` when the hottest sensor reaches 75°C.
+- Shows `▦ 42% 🌡 CPU 50°C 🌀 2400 RPM 🖴 18% 🖴 --%` in the top bar
+  when Fan 1 is active, switching the temperature icon to `🔥` when the
+  hottest sensor reaches 75°C.
 - Uses a smaller mini-font style for the top-bar percentage numbers.
 - Uses `/proc/meminfo` and `MemAvailable` for RAM usage.
 - Uses Linux `hwmon` temperature sensors, with `thermal_zone` sensors as a
@@ -46,6 +48,9 @@ journalctl --user -f /usr/bin/gnome-shell
   `amdgpu edge`, `nvme Composite`, `mt7925_phy0`, `r8169_0_bf00:00`, and
   ChromeOS EC labels are simplified to labels such as `🧠 CPU`, `🎮 GPU`,
   `💾 SSD Composite`, `📶 Wi-Fi`, `🌐 Ethernet`, and `🧱 Mainboard power`.
+- Uses Linux `hwmon` fan sensors. Fan 1 appears in the top bar and dropdown
+  while it is above 0 RPM; other fans appear only in the dropdown while they
+  are above 0 RPM.
 - Uses GNOME filesystem stats for `/` and the mounted `Work` SSD.
 - Looks for the `Work` SSD at common mount points such as
   `/run/media/$USER/Work` and `/mnt/Work`; if it is not mounted, the top bar

@@ -1,6 +1,6 @@
 {
   "name": "FedoraUsage",
-  "description": "Show current RAM, swap, temperature, and filesystem usage in the GNOME top bar.",
+  "description": "Show current RAM, swap, temperature, fan speed, and filesystem usage in the GNOME top bar.",
   "uuid": "FedoraUsage@local",
   "shell-version": [
     "50"
