@@ -9,9 +9,19 @@
     </key>
     <key name="sensor-history-retention-days" type="i">
       <default>7</default>
-      <range min="1" max="365"/>
+      <range min="1" max="10080"/>
       <summary>Sensor history retention length</summary>
-      <description>Number of local calendar days of sensor history to retain.</description>
+      <description>Number of selected time units of sensor history to retain.</description>
+    </key>
+    <key name="sensor-history-retention-unit" type="s">
+      <default>'days'</default>
+      <choices>
+        <choice value='minutes'/>
+        <choice value='hours'/>
+        <choice value='days'/>
+      </choices>
+      <summary>Sensor history retention unit</summary>
+      <description>Time unit used by the sensor history retention length.</description>
     </key>
   </schema>
 </schemalist>

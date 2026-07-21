@@ -25,7 +25,11 @@ const TEMPERATURE_CRITICAL_THRESHOLD_C = 90;
 const SENSOR_LOG_DIRECTORY_NAME = 'System Usage Logs';
 const SENSOR_LOG_FILE_PATTERN = /^sensor-data-(\d{4}-\d{2}-\d{2})\.jsonl$/;
 const SENSOR_HISTORY_ENABLED_KEY = 'sensor-history-enabled';
+// Retain the original key name so existing day-based preferences migrate
+// naturally when the unit setting is introduced.
 const SENSOR_HISTORY_RETENTION_DAYS_KEY = 'sensor-history-retention-days';
+const SENSOR_HISTORY_RETENTION_UNIT_KEY = 'sensor-history-retention-unit';
+const SENSOR_HISTORY_CLEANUP_INTERVAL_SECONDS = 60;
 
 const STORAGE_FILESYSTEMS = [
     {
@@ -116,7 +120,7 @@ function _setOwnerOnlyPermissions(file, mode) {
         null);
 }
 
-function _removeExpiredSensorLogs(directoryPath, now, retentionDays) {
+function _removeExpiredDailySensorLogs(directoryPath, now, retentionDays) {
     const oldestRetainedDate = now
         .add_days(-(retentionDays - 1))
         .format('%Y-%m-%d');
@@ -131,6 +135,73 @@ function _removeExpiredSensorLogs(directoryPath, now, retentionDays) {
     }
 }
 
+function _removeExpiredTimedSensorLogs(directoryPath, cutoff) {
+    const cutoffDate = cutoff.format('%Y-%m-%d');
+    const cutoffUnix = cutoff.to_unix();
+
+    for (const fileName of _listDirectoryNames(directoryPath)) {
+        const match = fileName.match(SENSOR_LOG_FILE_PATTERN);
+
+        if (!match)
+            continue;
+
+        const file = Gio.File.new_for_path(`${directoryPath}/${fileName}`);
+
+        if (match[1] < cutoffDate) {
+            file.delete(null);
+            continue;
+        }
+
+        if (match[1] > cutoffDate)
+            continue;
+
+        const [, contents] = file.load_contents(null);
+        const decoder = new TextDecoder('utf-8');
+        const retainedLines = [];
+
+        for (const line of decoder.decode(contents).split('\n')) {
+            if (!line)
+                continue;
+
+            try {
+                const timestamp = JSON.parse(line).timestamp;
+                const recordedAt = typeof timestamp === 'string'
+                    ? GLib.DateTime.new_from_iso8601(timestamp, null)
+                    : null;
+
+                if (recordedAt === null || recordedAt.to_unix() >= cutoffUnix)
+                    retainedLines.push(line);
+            } catch {
+                // Keep an unreadable record rather than risk deleting user data.
+                retainedLines.push(line);
+            }
+        }
+
+        if (retainedLines.length === 0) {
+            file.delete(null);
+            continue;
+        }
+
+        const encodedContents = new TextEncoder('utf-8')
+            .encode(`${retainedLines.join('\n')}\n`);
+
+        file.replace_contents(
+            encodedContents,
+            null,
+            false,
+            Gio.FileCreateFlags.PRIVATE,
+            null);
+        _setOwnerOnlyPermissions(file, 0o600);
+    }
+}
+
+function _retentionCutoff(now, retentionLength, retentionUnit) {
+    if (retentionUnit === 'minutes')
+        return now.add_seconds(-retentionLength * 60);
+
+    return now.add_seconds(-retentionLength * 60 * 60);
+}
+
 class SensorHistoryLogger {
     constructor() {
         this._directoryPath = GLib.build_filenamev([
@@ -140,10 +211,14 @@ class SensorHistoryLogger {
         this._lastCleanupSignature = null;
     }
 
-    log(snapshot, retentionDays) {
+    log(snapshot, retentionLength, retentionUnit) {
         const now = GLib.DateTime.new_now_local();
         const date = now.format('%Y-%m-%d');
-        const cleanupSignature = `${date}:${retentionDays}`;
+        const cleanupPeriod = retentionUnit === 'days'
+            ? date
+            : Math.floor(now.to_unix() / SENSOR_HISTORY_CLEANUP_INTERVAL_SECONDS);
+        const cleanupSignature =
+            `${cleanupPeriod}:${retentionLength}:${retentionUnit}`;
         const directory = Gio.File.new_for_path(this._directoryPath);
 
         if (GLib.mkdir_with_parents(this._directoryPath, 0o700) !== 0)
@@ -172,7 +247,14 @@ class SensorHistoryLogger {
 
         if (this._lastCleanupSignature !== cleanupSignature) {
             try {
-                _removeExpiredSensorLogs(this._directoryPath, now, retentionDays);
+                if (retentionUnit === 'days') {
+                    _removeExpiredDailySensorLogs(
+                        this._directoryPath, now, retentionLength);
+                } else {
+                    _removeExpiredTimedSensorLogs(
+                        this._directoryPath,
+                        _retentionCutoff(now, retentionLength, retentionUnit));
+                }
             } catch (error) {
                 console.error(
                     `System Usage Monitor: failed to remove expired sensor history: ${error}`);
@@ -602,11 +684,12 @@ function _formatBytes(bytes) {
 
 const SystemUsageIndicator = GObject.registerClass(
 class SystemUsageIndicator extends PanelMenu.Button {
-    constructor(settings) {
+    constructor(settings, openPreferences) {
         super(0.0, 'System Usage Monitor');
 
         this._timeoutId = 0;
         this._settings = settings;
+        this._openPreferences = openPreferences;
         this._historyLogger = new SensorHistoryLogger();
 
         this._panelBox = new St.BoxLayout({
@@ -736,6 +819,25 @@ class SystemUsageIndicator extends PanelMenu.Button {
         super.destroy();
     }
 
+    vfunc_event(event) {
+        const eventType = event.type();
+        const isSecondaryButtonEvent =
+            (eventType === Clutter.EventType.BUTTON_PRESS ||
+                eventType === Clutter.EventType.BUTTON_RELEASE) &&
+            event.get_button() === Clutter.BUTTON_SECONDARY;
+
+        if (isSecondaryButtonEvent) {
+            if (eventType === Clutter.EventType.BUTTON_RELEASE) {
+                this.menu.close();
+                this._openPreferences();
+            }
+
+            return Clutter.EVENT_STOP;
+        }
+
+        return super.vfunc_event(event);
+    }
+
     _update() {
         let stats;
         let temperatureStats;
@@ -771,12 +873,15 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         if (this._settings.get_boolean(SENSOR_HISTORY_ENABLED_KEY)) {
             try {
-                const retentionDays = Math.max(
+                const retentionLength = Math.max(
                     this._settings.get_int(SENSOR_HISTORY_RETENTION_DAYS_KEY), 1);
+                const retentionUnit =
+                    this._settings.get_string(SENSOR_HISTORY_RETENTION_UNIT_KEY);
 
                 this._historyLogger.log(
                     _buildSensorSnapshot(stats, temperatureStats, fanStats, storageStats),
-                    retentionDays);
+                    retentionLength,
+                    retentionUnit);
             } catch (error) {
                 console.error(`System Usage Monitor: failed to write sensor history: ${error}`);
             }
@@ -915,7 +1020,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
 export default class SystemUsageExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
-        this._indicator = new SystemUsageIndicator(this._settings);
+        this._indicator = new SystemUsageIndicator(
+            this._settings,
+            () => this.openPreferences());
         Main.panel.addToStatusArea('system-usage', this._indicator, 0, 'right');
     }
 
