@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $Uuid = 'system-usage@crunchycodes.net'
+$LegacyUuid = 'FedoraUsage@local'
 $SourceDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $TargetDir = Join-Path $HOME ".local/share/gnome-shell/extensions/$Uuid"
 $SchemaName = 'org.gnome.shell.extensions.system-usage.gschema.xml'
@@ -28,6 +29,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Installed $Uuid to $TargetDir"
 
 if (Get-Command gnome-extensions -ErrorAction SilentlyContinue) {
+    $InstalledExtensions = & gnome-extensions list 2>$null
+    if ($LASTEXITCODE -eq 0 -and $InstalledExtensions -contains $LegacyUuid) {
+        & gnome-extensions disable $LegacyUuid 2>$null
+        Write-Host "Disabled obsolete extension $LegacyUuid"
+    }
+
     Write-Host "Resetting $Uuid in the GNOME menu bar..."
 
     & gnome-extensions disable $Uuid 2>$null

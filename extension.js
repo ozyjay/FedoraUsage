@@ -692,13 +692,14 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._openPreferences = openPreferences;
         this._historyLogger = new SensorHistoryLogger();
 
-        this.connect('button-press-event', (_actor, event) => {
-            if (event.get_button() !== Clutter.BUTTON_SECONDARY)
-                return Clutter.EVENT_PROPAGATE;
+        // PanelMenu.Button handles pointer input through this gesture, before
+        // legacy button events reach the actor.
+        this._clickGesture.connect('recognize', () => {
+            if (this._clickGesture.get_button() !== Clutter.BUTTON_SECONDARY)
+                return;
 
             this.menu.close();
             this._openPreferences();
-            return Clutter.EVENT_STOP;
         });
 
         this._panelBox = new St.BoxLayout({
