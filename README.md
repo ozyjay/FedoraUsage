@@ -129,6 +129,9 @@ For live GNOME Shell logs while enabling or disabling the extension:
 journalctl --user -f /usr/bin/gnome-shell
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete development workflow,
+settings-change checklist and hardware compatibility guidance.
+
 ## Build a release archive
 
 ```bash
