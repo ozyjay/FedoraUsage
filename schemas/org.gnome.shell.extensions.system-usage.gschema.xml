@@ -24,8 +24,13 @@
     </key>
     <key name="show-work-filesystem-in-panel" type="b">
       <default>true</default>
-      <summary>Show Work SSD use in the top bar</summary>
-      <description>Show usage for the mounted Work filesystem in the panel indicator.</description>
+      <summary>Show secondary SSD use in the top bar</summary>
+      <description>Show usage for the configured secondary SSD in the panel indicator.</description>
+    </key>
+    <key name="secondary-ssd-location" type="s">
+      <default>'/mnt/work'</default>
+      <summary>Secondary SSD mount location</summary>
+      <description>Absolute path at which the secondary SSD is mounted.</description>
     </key>
     <key name="sensor-history-enabled" type="b">
       <default>false</default>

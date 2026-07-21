@@ -35,19 +35,7 @@ const SHOW_TEMPERATURE_KEY = 'show-temperature-in-panel';
 const SHOW_FAN_KEY = 'show-fan-in-panel';
 const SHOW_SYSTEM_FILESYSTEM_KEY = 'show-system-filesystem-in-panel';
 const SHOW_WORK_FILESYSTEM_KEY = 'show-work-filesystem-in-panel';
-
-function _workSsdPaths() {
-    const userName = GLib.get_user_name();
-
-    return [
-        `/run/media/${userName}/Work`,
-        `/media/${userName}/Work`,
-        '/mnt/Work',
-        '/mnt/work',
-        '/media/Work',
-        '/work',
-    ];
-}
+const SECONDARY_SSD_LOCATION_KEY = 'secondary-ssd-location';
 
 const STORAGE_FILESYSTEMS = [
     {
@@ -56,11 +44,19 @@ const STORAGE_FILESYSTEMS = [
         panelSettingKey: SHOW_SYSTEM_FILESYSTEM_KEY,
     },
     {
-        name: 'Work SSD',
-        paths: _workSsdPaths(),
+        name: 'Secondary SSD',
         panelSettingKey: SHOW_WORK_FILESYSTEM_KEY,
     },
 ];
+
+function _storageFilesystems(settings) {
+    return STORAGE_FILESYSTEMS.map(storage => storage.paths
+        ? storage
+        : {
+            ...storage,
+            paths: [settings.get_string(SECONDARY_SSD_LOCATION_KEY).trim()],
+        });
+}
 
 function _readMeminfo() {
     const [, contents] = GLib.file_get_contents('/proc/meminfo');
@@ -918,7 +914,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         temperatureStats = _readTemperatureStats();
         fanStats = _readFanStats();
-        storageStats = STORAGE_FILESYSTEMS.map(storage => {
+        storageStats = _storageFilesystems(this._settings).map(storage => {
             const usage = _readStorageUsage(storage);
 
             if (usage.error)

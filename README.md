@@ -20,7 +20,7 @@ Framework Computer Inc.
 
 - Updates every two seconds.
 - Shows configurable memory, hottest-sensor, active Fan 1, system filesystem
-  and Work SSD readings in the top bar.
+  and secondary SSD readings in the top bar.
 - Switches from `🌡` to `🔥` when the hottest sensor reaches 75°C.
 - Uses `/proc/meminfo` and `MemAvailable` for RAM usage.
 - Reads Linux `hwmon` temperature and fan sensors, falling back to
@@ -31,10 +31,11 @@ Framework Computer Inc.
 - Records a timestamped sensor snapshot every two seconds in JSON Lines format.
 - Keeps sensor history for a configurable number of minutes, hours or days in
   `~/System Usage Logs/`.
-- Provides preferences switches for top-bar readings and sensor history.
+- Provides preferences for top-bar readings, the secondary SSD location and
+  sensor history.
 - Uses GNOME filesystem statistics for the system filesystem mounted at `/`.
-- Looks for a secondary `Work` SSD at common mount points including
-  `/run/media/$USER/Work`, `/mnt/Work` and `/mnt/work`.
+- Monitors a secondary SSD at a configurable mount location, defaulting to
+  `/mnt/work`.
 - Shows warning colour at 70% and critical colour at 90% for memory or storage,
   and at 75°C and 90°C for temperature.
 
@@ -74,7 +75,8 @@ gnome-extensions prefs system-usage@crunchycodes.net
 
 The same preferences window controls which readings appear in the top bar.
 Disabling a top-bar reading does not remove its details from the dropdown or
-sensor history.
+sensor history. Set **Secondary SSD location** to the absolute path at which
+that filesystem is mounted.
 
 Read today's latest records with:
 

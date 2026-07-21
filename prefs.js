@@ -9,13 +9,14 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 const SENSOR_HISTORY_ENABLED_KEY = 'sensor-history-enabled';
 const SENSOR_HISTORY_RETENTION_DAYS_KEY = 'sensor-history-retention-days';
 const SENSOR_HISTORY_RETENTION_UNIT_KEY = 'sensor-history-retention-unit';
+const SECONDARY_SSD_LOCATION_KEY = 'secondary-ssd-location';
 
 const PANEL_ITEMS = [
     ['show-memory-in-panel', 'Memory', 'Show current memory use'],
     ['show-temperature-in-panel', 'Temperature', 'Show the hottest sensor reading'],
     ['show-fan-in-panel', 'Fan', 'Show Fan 1 while it is running'],
     ['show-system-filesystem-in-panel', 'System filesystem', 'Show usage for the filesystem mounted at /'],
-    ['show-work-filesystem-in-panel', 'Work SSD', 'Show usage for a mounted filesystem named Work'],
+    ['show-work-filesystem-in-panel', 'Secondary SSD', 'Show usage for the configured secondary SSD'],
 ];
 
 const RETENTION_UNITS = ['minutes', 'hours', 'days'];
@@ -44,6 +45,21 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
             panelGroup.add(row);
         }
+
+        const storageGroup = new Adw.PreferencesGroup({
+            title: 'Storage',
+            description: 'Set the mount location used for the secondary SSD reading.',
+        });
+        const secondarySsdLocationRow = new Adw.EntryRow({
+            title: 'Secondary SSD location',
+        });
+
+        settings.bind(
+            SECONDARY_SSD_LOCATION_KEY,
+            secondarySsdLocationRow,
+            'text',
+            Gio.SettingsBindFlags.DEFAULT);
+        storageGroup.add(secondarySsdLocationRow);
 
         const group = new Adw.PreferencesGroup({
             title: 'Sensor history',
@@ -102,6 +118,7 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         group.add(retentionRow);
         group.add(retentionUnitRow);
         page.add(panelGroup);
+        page.add(storageGroup);
         page.add(group);
         window.add(page);
     }
