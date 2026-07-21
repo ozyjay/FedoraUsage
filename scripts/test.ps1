@@ -1,5 +1,16 @@
 $ErrorActionPreference = 'Stop'
 
+# VS Code's Snap exports its private GIO module directory to integrated
+# terminals. Host GNOME tools cannot reliably load modules from that directory.
+$IsVsCodeSnap =
+    (Get-Command snap -ErrorAction SilentlyContinue) -and
+    $env:SNAP_NAME -eq 'code' -and
+    $env:GIO_MODULE_DIR -like '*/snap/code/*'
+
+if ($IsVsCodeSnap) {
+    Remove-Item Env:GIO_MODULE_DIR
+}
+
 $Uuid = 'system-usage@crunchycodes.net'
 $SourceDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $TargetDir = Join-Path $HOME ".local/share/gnome-shell/extensions/$Uuid"
