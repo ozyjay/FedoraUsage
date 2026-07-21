@@ -3,9 +3,15 @@
   <schema id="org.gnome.shell.extensions.system-usage"
           path="/org/gnome/shell/extensions/system-usage/">
     <key name="sensor-history-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Record sensor history</summary>
       <description>Write timestamped system sensor snapshots to daily log files.</description>
+    </key>
+    <key name="sensor-history-retention-days" type="i">
+      <default>7</default>
+      <range min="1" max="365"/>
+      <summary>Sensor history retention length</summary>
+      <description>Number of local calendar days of sensor history to retain.</description>
     </key>
   </schema>
 </schemalist>

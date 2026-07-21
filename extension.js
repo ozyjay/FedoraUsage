@@ -23,9 +23,9 @@ const CRITICAL_THRESHOLD = 90;
 const TEMPERATURE_WARNING_THRESHOLD_C = 75;
 const TEMPERATURE_CRITICAL_THRESHOLD_C = 90;
 const SENSOR_LOG_DIRECTORY_NAME = 'System Usage Logs';
-const SENSOR_LOG_RETENTION_DAYS = 7;
 const SENSOR_LOG_FILE_PATTERN = /^sensor-data-(\d{4}-\d{2}-\d{2})\.jsonl$/;
 const SENSOR_HISTORY_ENABLED_KEY = 'sensor-history-enabled';
+const SENSOR_HISTORY_RETENTION_DAYS_KEY = 'sensor-history-retention-days';
 
 const STORAGE_FILESYSTEMS = [
     {
@@ -116,9 +116,9 @@ function _setOwnerOnlyPermissions(file, mode) {
         null);
 }
 
-function _removeExpiredSensorLogs(directoryPath, now) {
+function _removeExpiredSensorLogs(directoryPath, now, retentionDays) {
     const oldestRetainedDate = now
-        .add_days(-(SENSOR_LOG_RETENTION_DAYS - 1))
+        .add_days(-(retentionDays - 1))
         .format('%Y-%m-%d');
 
     for (const fileName of _listDirectoryNames(directoryPath)) {
@@ -137,12 +137,13 @@ class SensorHistoryLogger {
             GLib.get_home_dir(),
             SENSOR_LOG_DIRECTORY_NAME,
         ]);
-        this._lastCleanupDate = null;
+        this._lastCleanupSignature = null;
     }
 
-    log(snapshot) {
+    log(snapshot, retentionDays) {
         const now = GLib.DateTime.new_now_local();
         const date = now.format('%Y-%m-%d');
+        const cleanupSignature = `${date}:${retentionDays}`;
         const directory = Gio.File.new_for_path(this._directoryPath);
 
         if (GLib.mkdir_with_parents(this._directoryPath, 0o700) !== 0)
@@ -169,15 +170,15 @@ class SensorHistoryLogger {
 
         _setOwnerOnlyPermissions(logFile, 0o600);
 
-        if (this._lastCleanupDate !== date) {
+        if (this._lastCleanupSignature !== cleanupSignature) {
             try {
-                _removeExpiredSensorLogs(this._directoryPath, now);
+                _removeExpiredSensorLogs(this._directoryPath, now, retentionDays);
             } catch (error) {
                 console.error(
                     `System Usage Monitor: failed to remove expired sensor history: ${error}`);
             }
 
-            this._lastCleanupDate = date;
+            this._lastCleanupSignature = cleanupSignature;
         }
     }
 }
@@ -770,8 +771,12 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         if (this._settings.get_boolean(SENSOR_HISTORY_ENABLED_KEY)) {
             try {
+                const retentionDays = Math.max(
+                    this._settings.get_int(SENSOR_HISTORY_RETENTION_DAYS_KEY), 1);
+
                 this._historyLogger.log(
-                    _buildSensorSnapshot(stats, temperatureStats, fanStats, storageStats));
+                    _buildSensorSnapshot(stats, temperatureStats, fanStats, storageStats),
+                    retentionDays);
             } catch (error) {
                 console.error(`System Usage Monitor: failed to write sensor history: ${error}`);
             }

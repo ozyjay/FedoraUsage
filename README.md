@@ -30,7 +30,7 @@ Framework Computer Inc.
   Wi-Fi, Ethernet and mainboard readings.
 - Hides stopped fans and shows additional active fans in the dropdown menu.
 - Records a timestamped sensor snapshot every two seconds in JSON Lines format.
-- Keeps seven daily sensor log files in `~/System Usage Logs/`.
+- Keeps a configurable number of daily sensor logs in `~/System Usage Logs/`.
 - Provides a preferences switch for enabling or disabling sensor history.
 - Uses GNOME filesystem statistics for the system filesystem mounted at `/`.
 - Shows warning colour at 70% and critical colour at 90% for memory or storage,
@@ -52,15 +52,17 @@ their field names, such as `totalKib`, `totalBytes`, `temperatureC` and
 `speedRpm`.
 
 The log directory and files are readable only by your user account. A new file
-is started each local calendar day, and the current day plus the previous six
-days are retained. Other files in the directory are not removed. At a two-second
-interval, the extension writes 43,200 snapshots per full day. File sizes depend
-on the number of sensors; for example, a 2 KiB snapshot is about 84 MiB per day
-and 591 MiB across seven days.
+is started each local calendar day. Preferences can retain between 1 and 365
+calendar days, with a default of seven. Other files in the directory are not
+removed. At a two-second interval, the extension writes 43,200 snapshots per
+full day. File sizes depend on the number of sensors; for example, a 2 KiB
+snapshot is about 84 MiB per day and 591 MiB across seven days.
 
-Sensor history is enabled by default. Open the extension's preferences and turn
-off **Record sensor history** to stop writing new snapshots. Existing log files
-are retained, and panel monitoring continues normally.
+Sensor history is disabled by default. Open the extension's preferences, turn
+on **Record sensor history**, and adjust **Retention length** as needed. Turning
+logging off stops new snapshots but retains existing files, and panel monitoring
+continues normally. Reducing retention removes expired matching log files during
+the next snapshot.
 
 ```bash
 gnome-extensions prefs system-usage@crunchycodes.net
