@@ -692,6 +692,15 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._openPreferences = openPreferences;
         this._historyLogger = new SensorHistoryLogger();
 
+        this.connect('button-press-event', (_actor, event) => {
+            if (event.get_button() !== Clutter.BUTTON_SECONDARY)
+                return Clutter.EVENT_PROPAGATE;
+
+            this.menu.close();
+            this._openPreferences();
+            return Clutter.EVENT_STOP;
+        });
+
         this._panelBox = new St.BoxLayout({
             style_class: 'system-usage-panel',
             y_align: Clutter.ActorAlign.CENTER,
@@ -817,25 +826,6 @@ class SystemUsageIndicator extends PanelMenu.Button {
         }
 
         super.destroy();
-    }
-
-    vfunc_event(event) {
-        const eventType = event.type();
-        const isSecondaryButtonEvent =
-            (eventType === Clutter.EventType.BUTTON_PRESS ||
-                eventType === Clutter.EventType.BUTTON_RELEASE) &&
-            event.get_button() === Clutter.BUTTON_SECONDARY;
-
-        if (isSecondaryButtonEvent) {
-            if (eventType === Clutter.EventType.BUTTON_RELEASE) {
-                this.menu.close();
-                this._openPreferences();
-            }
-
-            return Clutter.EVENT_STOP;
-        }
-
-        return super.vfunc_event(event);
     }
 
     _update() {
