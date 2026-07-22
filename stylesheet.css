@@ -33,3 +33,16 @@
 .system-usage-unknown .system-usage-label {
   color: #c0bfbc;
 }
+
+.system-usage-label.system-usage-auto-hot,
+.system-usage-label.system-usage-auto-fault {
+  color: #ff7b63;
+}
+
+.system-usage-label.system-usage-auto-degraded {
+  color: #f8e45c;
+}
+
+.system-usage-label.system-usage-auto-disabled {
+  color: #c0bfbc;
+}

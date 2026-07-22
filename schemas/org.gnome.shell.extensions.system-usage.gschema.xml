@@ -53,5 +53,20 @@
       <summary>Sensor history retention unit</summary>
       <description>Time unit used by the sensor history retention length.</description>
     </key>
+    <key name="show-auto-powersaver-in-panel" type="b">
+      <default>true</default>
+      <summary>Show Auto-Powersaver in the top bar</summary>
+      <description>Show the Auto-Powersaver mode and control temperature in the panel indicator.</description>
+    </key>
+    <key name="show-auto-powersaver-gpu-temperature" type="b">
+      <default>true</default>
+      <summary>Show the Auto-Powersaver GPU diagnostic temperature</summary>
+      <description>Show the diagnostic-only amdgpu edge reading in the Auto-Powersaver menu.</description>
+    </key>
+    <key name="auto-powersaver-notifications-enabled" type="b">
+      <default>true</default>
+      <summary>Show Auto-Powersaver notifications</summary>
+      <description>Show notifications for protective, recovery and failed profile transitions.</description>
+    </key>
   </schema>
 </schemalist>

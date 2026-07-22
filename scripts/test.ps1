@@ -32,6 +32,27 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Settings schema validation failed.'
 }
 
+& python3 -m unittest discover -s (Join-Path $SourceDir 'tests') -v
+if ($LASTEXITCODE -ne 0) {
+    throw 'Auto-Powersaver tests failed.'
+}
+
+$PythonFiles = @(
+    (Join-Path $SourceDir 'auto_powersaver/core.py'),
+    (Join-Path $SourceDir 'auto_powersaver/service.py'),
+    (Join-Path $SourceDir 'bin/fedorausage')
+)
+& python3 -m py_compile $PythonFiles
+if ($LASTEXITCODE -ne 0) {
+    throw 'Auto-Powersaver Python validation failed.'
+}
+
+if (Get-Command bash -ErrorAction SilentlyContinue) {
+    & bash -n (Join-Path $SourceDir 'scripts/install-auto-powersaver.sh')
+    & bash -n (Join-Path $SourceDir 'scripts/uninstall-auto-powersaver.sh')
+    & bash -n (Join-Path $SourceDir 'scripts/manual-auto-powersaver-test.sh')
+}
+
 if (Test-Path $PackDir) {
     Remove-Item -Recurse -Force $PackDir
 }

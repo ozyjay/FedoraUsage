@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=FedoraUsage Auto-Powersaver policy service
+Documentation=https://github.com/ozyjay/FedoraUsage
+Requires=tuned.service
+After=tuned.service dbus.service
+Conflicts=framework-thermal-policy.service
+
+[Service]
+Type=dbus
+BusName=net.crunchycodes.FedoraUsage.AutoPowersaver1
+ExecStart=/usr/libexec/fedorausage-auto-powersaver
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=fedorausage-auto-powersaver
+RuntimeDirectoryMode=0700
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/fedorausage /run/fedorausage-auto-powersaver
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

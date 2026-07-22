@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!DOCTYPE policyconfig PUBLIC
+  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>FedoraUsage</vendor>
+  <vendor_url>https://github.com/ozyjay/FedoraUsage</vendor_url>
+  <action id="net.crunchycodes.fedorausage.manage-auto-powersaver">
+    <description>Manage FedoraUsage Auto-Powersaver</description>
+    <message>Authentication is required to change the system-wide Auto-Powersaver policy.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

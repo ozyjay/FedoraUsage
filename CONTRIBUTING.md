@@ -13,6 +13,7 @@ Development and validation require:
 - `glib-compile-schemas`
 - `jq`, or Python 3 as a metadata-validation fallback
 - a GNOME Shell 50 session for runtime testing
+- Python 3 with GObject introspection for Auto-Powersaver service validation
 
 ## Development workflow
 
@@ -75,6 +76,24 @@ versions when reporting or investigating a device-specific issue.
 Sensor-history logs are user data. Changes to cleanup behaviour should retain
 unreadable or unrecognised content unless it is demonstrably expired and safe
 to remove.
+
+## Auto-Powersaver development
+
+The policy engine in `auto_powersaver/core.py` must remain independent of D-Bus,
+real sensors and TuneD. Add host-safe unit tests for every policy behaviour.
+The validation script runs these tests with a fake TuneD adapter, so it must
+never modify the actual host profile.
+
+The privileged adapter may read only the fixed sensor identities and may select
+only `balanced` or `powersave`. Never pass input through a shell or broaden the
+Polkit action into arbitrary command, sensor-path, profile or unit control.
+Keep persistent configuration under `/etc` separate from temporary state under
+`/run`.
+
+Installing or manually testing the service changes the host and is not part of
+normal validation. Follow the explicit opt-in checklist in
+`docs/auto-powersaver.md`, capture an audit, and restore the original enabled
+state, thresholds and TuneD profile.
 
 ## Release check
 

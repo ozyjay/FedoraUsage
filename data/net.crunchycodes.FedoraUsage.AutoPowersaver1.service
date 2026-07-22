@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[D-BUS Service]
+Name=net.crunchycodes.FedoraUsage.AutoPowersaver1
+Exec=/usr/bin/systemctl start fedorausage-auto-powersaver.service
+User=root
+SystemdService=fedorausage-auto-powersaver.service

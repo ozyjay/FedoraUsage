@@ -1,0 +1,130 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""FedoraUsage command-line interface."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+import gi
+
+gi.require_version('Gio', '2.0')
+gi.require_version('GLib', '2.0')
+from gi.repository import Gio, GLib  # noqa: E402
+
+
+BUS_NAME = 'net.crunchycodes.FedoraUsage.AutoPowersaver1'
+OBJECT_PATH = '/net/crunchycodes/FedoraUsage/AutoPowersaver1'
+INTERFACE_NAME = BUS_NAME
+
+
+def _duration(value: str) -> int:
+    suffixes = {'m': 60, 'h': 3600, 's': 1}
+    try:
+        multiplier = suffixes[value[-1].lower()]
+        duration = int(value[:-1]) * multiplier
+    except (KeyError, ValueError, IndexError) as error:
+        raise argparse.ArgumentTypeError('use a duration such as 15m or 1h') from error
+    if not 60 <= duration <= 86_400:
+        raise argparse.ArgumentTypeError('duration must be between 1 minute and 24 hours')
+    return duration
+
+
+def _history_limit(value: str) -> int:
+    try:
+        limit = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError('history limit must be an integer') from error
+    if not 1 <= limit <= 200:
+        raise argparse.ArgumentTypeError('history limit must be between 1 and 200')
+    return limit
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog='fedorausage')
+    features = parser.add_subparsers(dest='feature', required=True)
+    auto = features.add_parser('auto-powersaver')
+    commands = auto.add_subparsers(dest='command', required=True)
+    commands.add_parser('status')
+    commands.add_parser('enable')
+    disable = commands.add_parser('disable')
+    disable.add_argument('--balanced', action='store_true')
+    pause = commands.add_parser('pause')
+    pause.add_argument('duration', type=_duration)
+    commands.add_parser('resume')
+    force = commands.add_parser('force')
+    force.add_argument('profile', choices=('balanced', 'powersave'))
+    commands.add_parser('automatic')
+    thresholds = commands.add_parser('set-thresholds')
+    thresholds.add_argument('hot_c', type=float)
+    thresholds.add_argument('recovery_c', type=float)
+    history = commands.add_parser('history')
+    history.add_argument('--limit', type=_history_limit, default=20, metavar='1..200')
+    return parser
+
+
+def _call(proxy: Gio.DBusProxy, method: str, parameters: GLib.Variant | None) -> object:
+    result = proxy.call_sync(
+        method, parameters, Gio.DBusCallFlags.NONE, 120_000, None)
+    payload, = result.unpack()
+    return json.loads(payload)
+
+
+def main() -> int:
+    arguments = _parser().parse_args()
+    if arguments.command == 'set-thresholds' and not (
+        40 <= arguments.hot_c <= 110 and
+        30 <= arguments.recovery_c < arguments.hot_c
+    ):
+        print(
+            'fedorausage: hot threshold must be 40–110°C and recovery must be '
+            'at least 30°C and below hot',
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        proxy = Gio.DBusProxy.new_for_bus_sync(
+            Gio.BusType.SYSTEM,
+            Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
+            None,
+            BUS_NAME,
+            OBJECT_PATH,
+            INTERFACE_NAME,
+            None,
+        )
+        command = arguments.command
+        if command == 'status':
+            result = _call(proxy, 'GetStatus', None)
+        elif command == 'enable':
+            result = _call(proxy, 'Enable', None)
+        elif command == 'disable':
+            result = _call(proxy, 'Disable', GLib.Variant('(b)', (arguments.balanced,)))
+        elif command == 'pause':
+            result = _call(proxy, 'Pause', GLib.Variant('(u)', (arguments.duration,)))
+        elif command == 'resume':
+            result = _call(proxy, 'Resume', None)
+        elif command == 'force':
+            result = _call(proxy, 'ForceProfile', GLib.Variant('(s)', (arguments.profile,)))
+        elif command == 'automatic':
+            result = _call(proxy, 'ReturnToAutomatic', None)
+        elif command == 'set-thresholds':
+            result = _call(
+                proxy, 'SetThresholds',
+                GLib.Variant('(dd)', (arguments.hot_c, arguments.recovery_c)))
+        elif command == 'history':
+            result = _call(
+                proxy, 'GetRecentTransitions', GLib.Variant('(u)', (arguments.limit,)))
+        else:
+            raise RuntimeError(f'unsupported command: {command}')
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write('\n')
+    except GLib.Error as error:
+        print(f'fedorausage: {error.message}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

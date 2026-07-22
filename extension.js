@@ -36,6 +36,35 @@ const SHOW_FAN_KEY = 'show-fan-in-panel';
 const SHOW_SYSTEM_FILESYSTEM_KEY = 'show-system-filesystem-in-panel';
 const SHOW_WORK_FILESYSTEM_KEY = 'show-work-filesystem-in-panel';
 const SECONDARY_SSD_LOCATION_KEY = 'secondary-ssd-location';
+const SHOW_AUTO_POWERSAVER_KEY = 'show-auto-powersaver-in-panel';
+const SHOW_AUTO_POWERSAVER_GPU_KEY = 'show-auto-powersaver-gpu-temperature';
+const AUTO_POWERSAVER_NOTIFICATIONS_KEY = 'auto-powersaver-notifications-enabled';
+const AUTO_POWERSAVER_BUS_NAME =
+    'net.crunchycodes.FedoraUsage.AutoPowersaver1';
+const AUTO_POWERSAVER_OBJECT_PATH =
+    '/net/crunchycodes/FedoraUsage/AutoPowersaver1';
+const AUTO_POWERSAVER_INTERFACE = AUTO_POWERSAVER_BUS_NAME;
+
+const AUTO_POLICY_LABELS = {
+    disabled: 'Disabled',
+    automatic: 'Automatic',
+    paused: 'Paused',
+    manual_override: 'Manual override',
+};
+
+const AUTO_THERMAL_LABELS = {
+    normal: 'Normal',
+    hot: 'Hot',
+    telemetry_degraded: 'Telemetry degraded',
+    unknown: 'Unknown',
+};
+
+const AUTO_HEALTH_LABELS = {
+    healthy: 'Healthy',
+    service_unavailable: 'Service unavailable',
+    tuned_unavailable: 'TuneD unavailable',
+    fault: 'Fault',
+};
 
 const STORAGE_FILESYSTEMS = [
     {
@@ -712,6 +741,12 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._settingsSignalIds = [];
         this._openPreferences = openPreferences;
         this._historyLogger = new SensorHistoryLogger();
+        this._autoPowersaverProxy = null;
+        this._autoPowersaverProxySignalId = 0;
+        this._autoPowersaverCancellable = new Gio.Cancellable();
+        this._autoPowersaverStatus = null;
+        this._updatingAutoPowersaverSwitch = false;
+        this._lastAutoPowersaverNotificationAt = 0;
 
         // PanelMenu.Button handles pointer input through this gesture, before
         // legacy button events reach the actor.
@@ -756,6 +791,19 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         this._panelBox.add_child(this._temperatureIconLabel);
         this._panelBox.add_child(this._temperatureLabel);
+
+        this._autoPowersaverIconLabel = new St.Label({
+            style_class: 'system-usage-label system-usage-icon',
+            text: '!',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._autoPowersaverTemperatureLabel = new St.Label({
+            style_class: 'system-usage-label system-usage-number mini-font',
+            text: '--°C',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._panelBox.add_child(this._autoPowersaverIconLabel);
+        this._panelBox.add_child(this._autoPowersaverTemperatureLabel);
 
         this._fanIconLabel = new St.Label({
             style_class: 'system-usage-label system-usage-icon',
@@ -831,12 +879,122 @@ class SystemUsageIndicator extends PanelMenu.Button {
         for (const item of this._storageItems)
             this.menu.addMenuItem(item);
 
+        this._autoPowersaverSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this._autoPowersaverSwitch = new PopupMenu.PopupSwitchMenuItem(
+            'Auto-Powersaver', false);
+        this._autoPowersaverModeItem = this._createStatusItem('Mode');
+        this._autoPowersaverThermalItem = this._createStatusItem('Thermal state');
+        this._autoPowersaverHealthItem = this._createStatusItem('Service health');
+        this._autoPowersaverControlTemperatureItem =
+            this._createStatusItem('Control temperature');
+        this._autoPowersaverProfileItem = this._createStatusItem('TuneD profile');
+        this._autoPowersaverTctlItem = this._createStatusItem('Tctl');
+        this._autoPowersaverEcItem = this._createStatusItem('EC CPU');
+        this._autoPowersaverGpuItem = this._createStatusItem('GPU edge');
+        this._autoPowersaverThresholdsItem = this._createStatusItem('Thresholds');
+        this._autoPowersaverReasonItem = this._createStatusItem('Reason');
+        this._autoPowersaverPause15Item =
+            new PopupMenu.PopupMenuItem('Pause for 15 minutes');
+        this._autoPowersaverPause60Item =
+            new PopupMenu.PopupMenuItem('Pause for 1 hour');
+        this._autoPowersaverResumeItem =
+            new PopupMenu.PopupMenuItem('Resume');
+        this._autoPowersaverForceSaverItem =
+            new PopupMenu.PopupMenuItem('Force Power Saver');
+        this._autoPowersaverForceBalancedItem =
+            new PopupMenu.PopupMenuItem('Force Balanced');
+        this._autoPowersaverAutomaticItem =
+            new PopupMenu.PopupMenuItem('Return to Automatic');
+        this._autoPowersaverDisableBalancedItem =
+            new PopupMenu.PopupMenuItem('Disable and switch to Balanced');
+        this._autoPowersaverHistorySubMenu =
+            new PopupMenu.PopupSubMenuMenuItem('Recent activity');
+        this._autoPowersaverHistoryItems = [];
+        this._autoPowersaverInfoItem = new PopupMenu.PopupMenuItem(
+            'Changes the Fedora system-wide TuneD profile.', {
+                reactive: false,
+                can_focus: false,
+            });
+        this._autoPowersaverSettingsItem =
+            new PopupMenu.PopupMenuItem('Auto-Powersaver settings…');
+
+        for (const item of [
+            this._autoPowersaverSeparator,
+            this._autoPowersaverSwitch,
+            this._autoPowersaverModeItem,
+            this._autoPowersaverThermalItem,
+            this._autoPowersaverHealthItem,
+            this._autoPowersaverControlTemperatureItem,
+            this._autoPowersaverProfileItem,
+            this._autoPowersaverTctlItem,
+            this._autoPowersaverEcItem,
+            this._autoPowersaverGpuItem,
+            this._autoPowersaverThresholdsItem,
+            this._autoPowersaverReasonItem,
+            new PopupMenu.PopupSeparatorMenuItem(),
+            this._autoPowersaverPause15Item,
+            this._autoPowersaverPause60Item,
+            this._autoPowersaverResumeItem,
+            this._autoPowersaverForceSaverItem,
+            this._autoPowersaverForceBalancedItem,
+            this._autoPowersaverAutomaticItem,
+            this._autoPowersaverDisableBalancedItem,
+            this._autoPowersaverHistorySubMenu,
+            this._autoPowersaverSettingsItem,
+            this._autoPowersaverInfoItem,
+        ])
+            this.menu.addMenuItem(item);
+
+        this._autoPowersaverSwitch.connect('toggled', (_item, state) => {
+            if (this._updatingAutoPowersaverSwitch)
+                return;
+            this._callAutoPowersaver(
+                state ? 'Enable' : 'Disable',
+                state
+                    ? null
+                    : new GLib.Variant('(b)', [
+                        this._autoPowersaverStatus?.disable_behavior === 'balanced' &&
+                        !this._autoPowersaverStatus?.hot_latched &&
+                        this._autoPowersaverStatus?.control_temperature_c !== null &&
+                        this._autoPowersaverStatus?.telemetry_age_seconds <=
+                            this._autoPowersaverStatus?.poll_interval_seconds * 2,
+                    ]));
+        });
+        this._autoPowersaverPause15Item.connect(
+            'activate', () => this._callAutoPowersaver(
+                'Pause', new GLib.Variant('(u)', [15 * 60])));
+        this._autoPowersaverPause60Item.connect(
+            'activate', () => this._callAutoPowersaver(
+                'Pause', new GLib.Variant('(u)', [60 * 60])));
+        this._autoPowersaverResumeItem.connect(
+            'activate', () => this._callAutoPowersaver('Resume'));
+        this._autoPowersaverForceSaverItem.connect(
+            'activate', () => this._callAutoPowersaver(
+                'ForceProfile', new GLib.Variant('(s)', ['powersave'])));
+        this._autoPowersaverForceBalancedItem.connect(
+            'activate', () => this._callAutoPowersaver(
+                'ForceProfile', new GLib.Variant('(s)', ['balanced'])));
+        this._autoPowersaverAutomaticItem.connect(
+            'activate', () => this._callAutoPowersaver('ReturnToAutomatic'));
+        this._autoPowersaverDisableBalancedItem.connect(
+            'activate', () => this._callAutoPowersaver(
+                'Disable', new GLib.Variant('(b)', [true])));
+        this._autoPowersaverSettingsItem.connect(
+            'activate', () => this._openPreferences());
+        this._autoPowersaverHistorySubMenu.menu.connect(
+            'open-state-changed', (_menu, open) => {
+                if (open)
+                    this._refreshAutoPowersaverHistory();
+            });
+
         for (const key of [
             SHOW_MEMORY_KEY,
             SHOW_TEMPERATURE_KEY,
             SHOW_FAN_KEY,
             SHOW_SYSTEM_FILESYSTEM_KEY,
             SHOW_WORK_FILESYSTEM_KEY,
+            SHOW_AUTO_POWERSAVER_KEY,
+            SHOW_AUTO_POWERSAVER_GPU_KEY,
         ]) {
             this._settingsSignalIds.push(this._settings.connect(
                 `changed::${key}`,
@@ -844,6 +1002,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
         }
 
         this._applyPanelVisibility();
+        this._setAutoPowersaverUnavailable();
+        this._connectAutoPowersaver();
         this._update();
         this._timeoutId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT,
@@ -855,6 +1015,12 @@ class SystemUsageIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._autoPowersaverCancellable.cancel();
+        if (this._autoPowersaverProxy && this._autoPowersaverProxySignalId) {
+            this._autoPowersaverProxy.disconnect(this._autoPowersaverProxySignalId);
+            this._autoPowersaverProxySignalId = 0;
+        }
+        this._autoPowersaverProxy = null;
         if (this._timeoutId) {
             GLib.Source.remove(this._timeoutId);
             this._timeoutId = 0;
@@ -870,11 +1036,17 @@ class SystemUsageIndicator extends PanelMenu.Button {
     _applyPanelVisibility() {
         const showMemory = this._settings.get_boolean(SHOW_MEMORY_KEY);
         const showTemperature = this._settings.get_boolean(SHOW_TEMPERATURE_KEY);
+        const showAutoPowersaver =
+            this._settings.get_boolean(SHOW_AUTO_POWERSAVER_KEY);
 
         this._memoryIconLabel.visible = showMemory;
         this._memoryPercentLabel.visible = showMemory;
         this._temperatureIconLabel.visible = showTemperature;
         this._temperatureLabel.visible = showTemperature;
+        this._autoPowersaverIconLabel.visible = showAutoPowersaver;
+        this._autoPowersaverTemperatureLabel.visible = showAutoPowersaver;
+        this._autoPowersaverGpuItem.visible =
+            this._settings.get_boolean(SHOW_AUTO_POWERSAVER_GPU_KEY);
 
         const showFan = this._settings.get_boolean(SHOW_FAN_KEY) &&
             this._fanSpeedLabel.text !== '';
@@ -888,6 +1060,335 @@ class SystemUsageIndicator extends PanelMenu.Button {
             labels.iconLabel.visible = visible;
             labels.percentLabel.visible = visible;
         });
+    }
+
+    _createStatusItem(label) {
+        return new PopupMenu.PopupMenuItem(`${label}: --`, {
+            reactive: false,
+            can_focus: false,
+        });
+    }
+
+    _connectAutoPowersaver() {
+        Gio.DBusProxy.new_for_bus(
+            Gio.BusType.SYSTEM,
+            Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
+            null,
+            AUTO_POWERSAVER_BUS_NAME,
+            AUTO_POWERSAVER_OBJECT_PATH,
+            AUTO_POWERSAVER_INTERFACE,
+            this._autoPowersaverCancellable,
+            (_source, result) => {
+                if (this._autoPowersaverCancellable.is_cancelled())
+                    return;
+
+                try {
+                    this._autoPowersaverProxy =
+                        Gio.DBusProxy.new_for_bus_finish(result);
+                    this._autoPowersaverProxySignalId =
+                        this._autoPowersaverProxy.connect(
+                            'g-signal',
+                            (_proxy, _sender, signalName, parameters) =>
+                                this._handleAutoPowersaverSignal(signalName, parameters));
+                    this._autoPowersaverProxy.connect(
+                        'notify::g-name-owner', () => {
+                            if (this._autoPowersaverProxy.get_name_owner())
+                                this._loadAutoPowersaverStatus();
+                            else
+                                this._setAutoPowersaverUnavailable();
+                        });
+                    this._loadAutoPowersaverStatus();
+                } catch (error) {
+                    if (!error.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+                        console.error(
+                            `System Usage Monitor: failed to connect to Auto-Powersaver: ${error}`);
+                    }
+                    this._setAutoPowersaverUnavailable();
+                }
+            });
+    }
+
+    _loadAutoPowersaverStatus() {
+        this._callAutoPowersaver('GetStatus', null, false);
+    }
+
+    _callAutoPowersaver(method, parameters = null, showError = true) {
+        if (!this._autoPowersaverProxy) {
+            if (showError)
+                Main.notify('Auto-Powersaver', 'The system service is unavailable.');
+            this._setAutoPowersaverUnavailable();
+            return;
+        }
+
+        this._autoPowersaverProxy.call(
+            method,
+            parameters,
+            Gio.DBusCallFlags.NONE,
+            120000,
+            this._autoPowersaverCancellable,
+            (proxy, result) => {
+                if (this._autoPowersaverCancellable.is_cancelled())
+                    return;
+                try {
+                    const response = proxy.call_finish(result);
+                    const [payload] = response.deepUnpack();
+                    this._applyAutoPowersaverStatus(JSON.parse(payload));
+                } catch (error) {
+                    if (error.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        return;
+                    console.error(
+                        `System Usage Monitor: Auto-Powersaver ${method} failed: ${error}`);
+                    if (showError)
+                        Main.notify('Auto-Powersaver request failed', error.message);
+                    if (method === 'GetStatus')
+                        this._setAutoPowersaverUnavailable();
+                    else
+                        this._loadAutoPowersaverStatus();
+                }
+            });
+    }
+
+    _handleAutoPowersaverSignal(signalName, parameters) {
+        const [payload] = parameters.deepUnpack();
+        try {
+            if (signalName === 'StatusChanged') {
+                this._applyAutoPowersaverStatus(JSON.parse(payload));
+            } else if (signalName === 'TransitionRecorded') {
+                const transition = JSON.parse(payload);
+
+                this._refreshAutoPowersaverHistory();
+                this._notifyAutoPowersaverTransition(transition);
+            }
+        } catch (error) {
+            console.error(
+                `System Usage Monitor: invalid Auto-Powersaver ${signalName} payload: ${error}`);
+        }
+    }
+
+    _sensorTemperature(status, name) {
+        const reading = status.sensor_readings?.[name];
+
+        if (!reading?.valid || reading.temperature_c === null)
+            return 'Unavailable';
+        return _formatTemperature(reading.temperature_c);
+    }
+
+    _applyAutoPowersaverStatus(status) {
+        this._autoPowersaverStatus = status;
+        const mode = AUTO_POLICY_LABELS[status.policy_mode] ?? status.policy_mode;
+        const thermal = AUTO_THERMAL_LABELS[status.thermal_state] ??
+            status.thermal_state;
+        const health = AUTO_HEALTH_LABELS[status.service_health] ??
+            status.service_health;
+        const controlTemperature = status.control_temperature_c === null
+            ? 'Unavailable'
+            : _formatTemperature(status.control_temperature_c);
+
+        this._updatingAutoPowersaverSwitch = true;
+        this._autoPowersaverSwitch.setToggleState(Boolean(status.enabled));
+        this._updatingAutoPowersaverSwitch = false;
+        this._autoPowersaverSwitch.setSensitive(true);
+        this._autoPowersaverModeItem.label.text = `Mode: ${mode}`;
+        this._autoPowersaverThermalItem.label.text = `Thermal state: ${thermal}`;
+        this._autoPowersaverHealthItem.label.text = `Service health: ${health}`;
+        this._autoPowersaverControlTemperatureItem.label.text =
+            `Control temperature: ${controlTemperature}`;
+        this._autoPowersaverProfileItem.label.text =
+            `TuneD profile: ${status.active_profile ?? 'Unavailable'}`;
+        this._autoPowersaverTctlItem.label.text =
+            `Tctl: ${this._sensorTemperature(status, 'k10temp/Tctl')}`;
+        this._autoPowersaverEcItem.label.text =
+            `EC CPU: ${this._sensorTemperature(status, 'cros_ec/cpu@4c')}`;
+        this._autoPowersaverGpuItem.label.text =
+            `GPU edge: ${this._sensorTemperature(status, 'amdgpu/edge')}`;
+        this._autoPowersaverThresholdsItem.label.text =
+            `Thresholds: ${status.hot_threshold_c}°C hot / ` +
+            `${status.recovery_threshold_c}°C recovery`;
+        this._autoPowersaverReasonItem.label.text =
+            `Reason: ${(status.effective_profile_reason ?? 'Unknown').replace(/_/g, ' ')}`;
+
+        const icon = status.service_health !== 'healthy' ||
+            status.telemetry_quality !== 'healthy'
+            ? '!'
+            : {
+                disabled: '○',
+                paused: 'Ⅱ',
+                manual_override: 'M',
+                automatic: status.active_profile === 'powersave' ? '↓' : 'A',
+            }[status.policy_mode] ?? '!';
+        this._autoPowersaverIconLabel.text = icon;
+        this._autoPowersaverTemperatureLabel.text = status.control_temperature_c === null
+            ? '--°C'
+            : _formatTemperature(status.control_temperature_c);
+        let autoVisualState = 'normal';
+
+        if (status.service_health !== 'healthy' || status.telemetry_quality === 'unknown')
+            autoVisualState = 'fault';
+        else if (status.thermal_state === 'hot')
+            autoVisualState = 'hot';
+        else if (status.telemetry_quality === 'degraded')
+            autoVisualState = 'degraded';
+        else if (!status.enabled)
+            autoVisualState = 'disabled';
+        this._setAutoPowersaverVisualState(autoVisualState);
+
+        const enabled = Boolean(status.enabled);
+        const canSelectBalanced = enabled && !status.hot_latched &&
+            status.control_temperature_c !== null && status.tuned_available &&
+            status.telemetry_age_seconds <= status.poll_interval_seconds * 2;
+        const canMutateProfile = enabled && status.tuned_available;
+
+        this._autoPowersaverPause15Item.setSensitive(enabled);
+        this._autoPowersaverPause60Item.setSensitive(enabled);
+        this._autoPowersaverResumeItem.setSensitive(
+            enabled && status.policy_mode === 'paused');
+        this._autoPowersaverForceSaverItem.setSensitive(canMutateProfile);
+        this._autoPowersaverForceBalancedItem.setSensitive(canSelectBalanced);
+        this._autoPowersaverAutomaticItem.setSensitive(
+            enabled && status.policy_mode !== 'automatic');
+        this._autoPowersaverDisableBalancedItem.setSensitive(canSelectBalanced);
+
+        if (status.policy_mode === 'paused' && status.paused_seconds_remaining !== null) {
+            const minutes = Math.max(1, Math.ceil(status.paused_seconds_remaining / 60));
+
+            this._autoPowersaverModeItem.label.text =
+                `Mode: Paused — ${minutes} min remaining`;
+        } else if (
+            status.policy_mode === 'manual_override' &&
+            status.manual_override_seconds_remaining !== null
+        ) {
+            const minutes = Math.max(
+                1, Math.ceil(status.manual_override_seconds_remaining / 60));
+
+            this._autoPowersaverModeItem.label.text =
+                `Mode: Manual override — ${minutes} min remaining`;
+        }
+    }
+
+    _setAutoPowersaverUnavailable() {
+        this._autoPowersaverStatus = null;
+        this._autoPowersaverIconLabel.text = '!';
+        this._autoPowersaverTemperatureLabel.text = '--°C';
+        this._setAutoPowersaverVisualState('fault');
+        this._updatingAutoPowersaverSwitch = true;
+        this._autoPowersaverSwitch.setToggleState(false);
+        this._updatingAutoPowersaverSwitch = false;
+        this._autoPowersaverSwitch.setSensitive(false);
+        this._autoPowersaverModeItem.label.text = 'Mode: Unavailable';
+        this._autoPowersaverThermalItem.label.text = 'Thermal state: Unknown';
+        this._autoPowersaverHealthItem.label.text =
+            'Service health: Service unavailable';
+        this._autoPowersaverControlTemperatureItem.label.text =
+            'Control temperature: Unavailable';
+        this._autoPowersaverProfileItem.label.text = 'TuneD profile: Unavailable';
+        for (const item of [
+            this._autoPowersaverPause15Item,
+            this._autoPowersaverPause60Item,
+            this._autoPowersaverResumeItem,
+            this._autoPowersaverForceSaverItem,
+            this._autoPowersaverForceBalancedItem,
+            this._autoPowersaverAutomaticItem,
+            this._autoPowersaverDisableBalancedItem,
+        ])
+            item.setSensitive(false);
+    }
+
+    _setAutoPowersaverVisualState(state) {
+        for (const actor of [
+            this._autoPowersaverIconLabel,
+            this._autoPowersaverTemperatureLabel,
+        ]) {
+            for (const name of ['normal', 'hot', 'degraded', 'fault', 'disabled'])
+                actor.remove_style_class_name(`system-usage-auto-${name}`);
+            actor.add_style_class_name(`system-usage-auto-${state}`);
+        }
+    }
+
+    _refreshAutoPowersaverHistory() {
+        if (!this._autoPowersaverProxy)
+            return;
+        this._autoPowersaverProxy.call(
+            'GetRecentTransitions',
+            new GLib.Variant('(u)', [10]),
+            Gio.DBusCallFlags.NONE,
+            5000,
+            this._autoPowersaverCancellable,
+            (proxy, result) => {
+                try {
+                    const response = proxy.call_finish(result);
+                    const [payload] = response.deepUnpack();
+                    this._setAutoPowersaverHistoryItems(JSON.parse(payload));
+                } catch (error) {
+                    if (!this._autoPowersaverCancellable.is_cancelled()) {
+                        console.error(
+                            `System Usage Monitor: could not load Auto-Powersaver history: ${error}`);
+                    }
+                }
+            });
+    }
+
+    _setAutoPowersaverHistoryItems(transitions) {
+        for (const item of this._autoPowersaverHistoryItems)
+            item.destroy();
+
+        const recent = [...transitions].reverse();
+        this._autoPowersaverHistoryItems = recent.length > 0
+            ? recent.map(transition => {
+                const timestamp = new Date(transition.timestamp);
+                const time = Number.isNaN(timestamp.valueOf())
+                    ? '--:--'
+                    : timestamp.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    });
+                const profileChange = transition.previous_profile &&
+                    transition.resulting_profile
+                    ? `${transition.previous_profile} → ${transition.resulting_profile}`
+                    : transition.reason.replace(/_/g, ' ');
+                const temperature = transition.control_temperature_c === null
+                    ? ''
+                    : ` ${_formatTemperature(transition.control_temperature_c)}`;
+
+                return new PopupMenu.PopupMenuItem(
+                    `${time}  ${profileChange}${temperature}`, {
+                        reactive: false,
+                        can_focus: false,
+                    });
+            })
+            : [new PopupMenu.PopupMenuItem('No recent activity', {
+                reactive: false,
+                can_focus: false,
+            })];
+        this._autoPowersaverHistoryItems.forEach(item =>
+            this._autoPowersaverHistorySubMenu.menu.addMenuItem(item));
+    }
+
+    _notifyAutoPowersaverTransition(transition) {
+        if (!this._settings.get_boolean(AUTO_POWERSAVER_NOTIFICATIONS_KEY))
+            return;
+        if (!['safety', 'recovery', 'fault'].includes(transition.trigger_source))
+            return;
+        const now = GLib.get_monotonic_time();
+
+        if (now - this._lastAutoPowersaverNotificationAt < 60 * 1000 * 1000)
+            return;
+
+        const temperature = transition.control_temperature_c === null
+            ? ''
+            : ` at ${transition.control_temperature_c.toFixed(1)}°C`;
+        let message;
+
+        if (!transition.success) {
+            message = `A profile transition failed${temperature}.`;
+        } else if (transition.resulting_profile === 'powersave') {
+            message = `Power Saver was enabled${temperature}.`;
+        } else if (transition.resulting_profile === 'balanced') {
+            message = `Balanced was restored${temperature}.`;
+        } else {
+            return;
+        }
+        this._lastAutoPowersaverNotificationAt = now;
+        Main.notify('Auto-Powersaver', message);
     }
 
     _update() {

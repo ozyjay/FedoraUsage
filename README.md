@@ -4,6 +4,8 @@ A GNOME Shell system monitor built for Framework Desktop and compatible with
 other computers running Fedora 44 Workstation. It shows configurable RAM,
 temperature, active fan speed and filesystem readings in the top bar, with
 additional RAM, swap, sensor, fan and storage details in a dropdown menu.
+It can also manage a host-level Auto-Powersaver policy through a separately
+installed root system service while the extension itself remains unprivileged.
 
 The extension targets GNOME Shell 50 and is currently tested on Fedora 44
 Workstation. It uses standard Linux interfaces, so its core memory and
@@ -38,6 +40,33 @@ Framework Computer Inc.
   `/mnt/work`.
 - Shows warning colour at 70% and critical colour at 90% for memory or storage,
   and at 75°C and 90°C for temperature.
+- Integrates Auto-Powersaver mode, control temperature, approved sensor health,
+  the active TuneD profile, safe controls and bounded transition history.
+- Selects TuneD `powersave` immediately at the hot threshold and returns to
+  `balanced` only after validated hysteresis, dwell and consecutive readings.
+- Keeps hot protection active during pause and manual override, and respects
+  external TuneD changes as temporary manual overrides while safely cool.
+
+## Auto-Powersaver
+
+Auto-Powersaver requires its separately installed root service. The GNOME
+extension never runs as root and never invokes TuneD directly. Install the
+service, then the extension:
+
+```bash
+sudo ./scripts/install-auto-powersaver.sh
+pwsh -NoProfile -File ./scripts/install.ps1
+```
+
+The service is designed for Framework Desktop with `k10temp/Tctl` and
+`cros_ec/cpu@4c` control sensors, Fedora TuneD and `tuned-ppd`. It chooses only
+the standard `balanced` and `powersave` profiles. Missing telemetry is never
+treated as a cool system. All user-requested system policy changes pass through
+a narrow D-Bus API and Polkit authorisation.
+
+See [Auto-Powersaver architecture and operations](docs/auto-powersaver.md) for
+state behaviour, CLI commands, configuration, migration, troubleshooting,
+manual hardware validation and safe removal.
 
 ## Sensor history
 
