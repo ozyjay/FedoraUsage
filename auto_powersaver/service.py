@@ -401,12 +401,12 @@ class AutoPowersaverService:
             'org.freedesktop.PolicyKit1.Authority',
             'CheckAuthorization',
             parameters,
-            GLib.VariantType.new('(bba{ss})'),
+            GLib.VariantType.new('((bba{ss}))'),
             Gio.DBusCallFlags.NONE,
             120_000,
             None,
         )
-        authorised, _challenge, _details = result.unpack()
+        (authorised, _challenge, _details), = result.unpack()
         if not authorised:
             raise PermissionError('not authorised to manage Auto-Powersaver')
 

@@ -264,6 +264,28 @@ class PolicyControllerTests(unittest.TestCase):
 
 
 class ConfigurationFileTests(unittest.TestCase):
+    def test_polkit_authorisation_reply_uses_struct_signature(self) -> None:
+        try:
+            from gi.repository import GLib
+            from auto_powersaver.service import AutoPowersaverService
+        except (ImportError, ValueError) as error:
+            self.skipTest(f'GIO bindings are unavailable: {error}')
+
+        class FakeConnection:
+            def call_sync(
+                self, _bus_name, _object_path, _interface_name, _method_name,
+                _parameters, reply_type, _flags, _timeout, _cancellable,
+            ):
+                self.reply_type = reply_type.dup_string()
+                return GLib.Variant('((bba{ss}))', ((True, False, {}),))
+
+        service = AutoPowersaverService.__new__(AutoPowersaverService)
+        service._connection = FakeConnection()
+
+        service._authorise(':1.123')
+
+        self.assertEqual(service._connection.reply_type, '((bba{ss}))')
+
     def test_default_configuration_file_loads(self) -> None:
         try:
             from auto_powersaver.service import load_config
