@@ -62,7 +62,10 @@ The service is designed for Framework Desktop with `k10temp/Tctl` and
 `cros_ec/cpu@4c` control sensors, Fedora TuneD and `tuned-ppd`. It chooses only
 the standard `balanced` and `powersave` profiles. Missing telemetry is never
 treated as a cool system. All user-requested system policy changes pass through
-a narrow D-Bus API and Polkit authorisation.
+a narrow D-Bus API and Polkit authorisation. Policy fields in the extension
+preferences are saved together with the **Apply** button. Live service updates
+continue to refresh diagnostics without replacing policy edits that have not
+yet been applied.
 
 See [Auto-Powersaver architecture and operations](docs/auto-powersaver.md) for
 state behaviour, CLI commands, configuration, migration, troubleshooting,

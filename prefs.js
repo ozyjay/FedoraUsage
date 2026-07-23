@@ -283,6 +283,26 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         let autoProxy = null;
         let updatingAutoRows = false;
         let currentAutoStatus = null;
+        let policyRowsDirty = false;
+        const markPolicyRowsDirty = () => {
+            if (updatingAutoRows)
+                return;
+
+            policyRowsDirty = true;
+            applyPolicyRow.subtitle = 'Unsaved policy settings';
+        };
+        for (const adjustment of [
+            hotAdjustment,
+            recoveryAdjustment,
+            dwellAdjustment,
+            readingCountAdjustment,
+            pollAdjustment,
+            overrideAdjustment,
+        ])
+            adjustment.connect('notify::value', markPolicyRowsDirty);
+        degradedRow.connect('notify::active', markPolicyRowsDirty);
+        disableBehaviourRow.connect('notify::selected', markPolicyRowsDirty);
+
         const setPolicySensitive = sensitive => {
             for (const row of [
                 autoEnabledRow, hotRow, recoveryRow, dwellRow, readingCountRow,
@@ -295,15 +315,18 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             currentAutoStatus = status;
             updatingAutoRows = true;
             autoEnabledRow.active = Boolean(status.enabled);
-            hotAdjustment.value = status.hot_threshold_c;
-            recoveryAdjustment.value = status.recovery_threshold_c;
-            dwellAdjustment.value = status.recovery_dwell_seconds;
-            readingCountAdjustment.value = status.recovery_reading_count;
-            pollAdjustment.value = status.poll_interval_seconds;
-            overrideAdjustment.value = status.manual_override_seconds / 60;
-            degradedRow.active = status.allow_single_sensor_degraded_operation;
-            disableBehaviourRow.selected =
-                status.disable_behavior === 'balanced' ? 1 : 0;
+            if (!policyRowsDirty) {
+                hotAdjustment.value = status.hot_threshold_c;
+                recoveryAdjustment.value = status.recovery_threshold_c;
+                dwellAdjustment.value = status.recovery_dwell_seconds;
+                readingCountAdjustment.value = status.recovery_reading_count;
+                pollAdjustment.value = status.poll_interval_seconds;
+                overrideAdjustment.value = status.manual_override_seconds / 60;
+                degradedRow.active =
+                    status.allow_single_sensor_degraded_operation;
+                disableBehaviourRow.selected =
+                    status.disable_behavior === 'balanced' ? 1 : 0;
+            }
             updatingAutoRows = false;
             setPolicySensitive(true);
 
@@ -391,7 +414,12 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
                             disableBehaviourRow.selected === 1
                                 ? 'balanced'
                                 : 'leave_unchanged',
-                        ]))));
+                        ]),
+                        status => {
+                            policyRowsDirty = false;
+                            applyPolicyRow.subtitle = 'Policy settings saved';
+                            applyStatus(status);
+                        })));
         });
 
         setPolicySensitive(false);
