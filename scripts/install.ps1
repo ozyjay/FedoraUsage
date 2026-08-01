@@ -13,6 +13,7 @@ New-Item -ItemType Directory -Force -Path $TargetSchemaDir | Out-Null
 
 Copy-Item -Force -Path (Join-Path $SourceDir 'metadata.json') -Destination (Join-Path $TargetDir 'metadata.json')
 Copy-Item -Force -Path (Join-Path $SourceDir 'extension.js') -Destination (Join-Path $TargetDir 'extension.js')
+Copy-Item -Force -Path (Join-Path $SourceDir 'panelPresentation.js') -Destination (Join-Path $TargetDir 'panelPresentation.js')
 Copy-Item -Force -Path (Join-Path $SourceDir 'prefs.js') -Destination (Join-Path $TargetDir 'prefs.js')
 Copy-Item -Force -Path (Join-Path $SourceDir 'stylesheet.css') -Destination (Join-Path $TargetDir 'stylesheet.css')
 Copy-Item -Force -Path $SourceSchema -Destination (Join-Path $TargetSchemaDir $SchemaName)

@@ -474,6 +474,8 @@ class ConfigurationFileTests(unittest.TestCase):
 
     def test_panel_readings_have_stable_order_and_compact_fields(self) -> None:
         extension_source = Path('extension.js').read_text(encoding='utf-8')
+        presentation_source = Path('panelPresentation.js').read_text(
+            encoding='utf-8')
         stylesheet_source = Path('stylesheet.css').read_text(encoding='utf-8')
         ordered_additions = [
             'this._panelBox.add_child(this._fanBox);',
@@ -504,7 +506,8 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertIn('.system-usage-percent', stylesheet_source)
         self.assertIn('.system-usage-temperature-value', stylesheet_source)
         self.assertIn('.system-usage-fan-speed', stylesheet_source)
-        self.assertIn("return `${sensor.friendlyIcon} ", extension_source)
+        self.assertIn("from './panelPresentation.js'", extension_source)
+        self.assertIn("return `${sensor.friendlyIcon} ", presentation_source)
         self.assertIn('spacing: 0.2em', stylesheet_source)
         self.assertIn('text-align: left', stylesheet_source)
 

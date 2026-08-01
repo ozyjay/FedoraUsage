@@ -11,6 +11,7 @@ Development and validation require:
 - PowerShell (`pwsh`)
 - `gnome-extensions`
 - `glib-compile-schemas`
+- `gjs`
 - `jq`, or Python 3 as a metadata-validation fallback
 - a GNOME Shell 50 session for runtime testing
 - Python 3 with GObject introspection for Auto-Powersaver service validation
@@ -37,6 +38,11 @@ Development and validation require:
    ```bash
    journalctl --user -f /usr/bin/gnome-shell
    ```
+
+For top-bar layout changes, exercise the visual matrix in
+[`docs/panel-visual-testing.md`](docs/panel-visual-testing.md). Automated tests
+cover presentation rules and boundary values, but only a live GNOME Shell
+session can expose font fallback, text scaling and pixel-level clipping.
 
 The installer copies the extension to
 `~/.local/share/gnome-shell/extensions/system-usage@crunchycodes.net`, compiles
@@ -109,7 +115,8 @@ manually, run:
 
 ```bash
 mkdir -p dist
-gnome-extensions pack --force --out-dir dist .
+gnome-extensions pack --force --out-dir dist \
+  --extra-source panelPresentation.js .
 ```
 
 Do not commit generated ZIP archives or `gschemas.compiled` files.

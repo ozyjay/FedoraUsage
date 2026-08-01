@@ -12,12 +12,22 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
+import {
+    autoPowersaverPanelPresentation,
+    formatFanSpeed,
+    formatPanelPercent,
+    formatPanelTemperature,
+    formatTemperature,
+    panelLevel,
+    PANEL_TEMPERATURE_NORMAL_LABEL,
+    shouldShowFan,
+    temperaturePanelIcon,
+} from './panelPresentation.js';
+
 const UPDATE_INTERVAL_SECONDS = 2;
 const PANEL_MEMORY_LABEL = '▦';
 const PANEL_FILESYSTEM_LABEL = '🖴';
 const PANEL_FAN_LABEL = '🌀';
-const PANEL_TEMPERATURE_NORMAL_LABEL = '🌡';
-const PANEL_TEMPERATURE_HIGH_LABEL = '🔥';
 const WARNING_THRESHOLD = 70;
 const CRITICAL_THRESHOLD = 90;
 const TEMPERATURE_WARNING_THRESHOLD_C = 75;
@@ -344,14 +354,6 @@ function _parseMillidegreeTemperature(rawText) {
     return temperature;
 }
 
-function _formatTemperature(temperature) {
-    return `${Math.round(temperature)}°C`;
-}
-
-function _formatFanSpeed(speed) {
-    return `${speed} RPM`;
-}
-
 function _friendlySensorInfo(rawName) {
     const normalisedName = rawName.toLowerCase();
 
@@ -450,10 +452,6 @@ function _applyFriendlySensorNames(sensors) {
     }
 
     return sensors;
-}
-
-function _formatPanelTemperature(sensor) {
-    return `${sensor.friendlyIcon} ${_formatTemperature(sensor.temperature)}`;
 }
 
 function _readHwmonTemperatureSensors() {
@@ -796,7 +794,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
         });
         this._memoryPercentLabel = new St.Label({
             style_class: 'system-usage-label system-usage-number mini-font system-usage-percent',
-            text: '--%',
+            text: formatPanelPercent(null),
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._memoryBox = this._createPanelField(
@@ -851,7 +849,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
             });
             const percentLabel = new St.Label({
                 style_class: 'system-usage-label system-usage-number mini-font system-usage-percent',
-                text: '--%',
+                text: formatPanelPercent(null),
                 y_align: Clutter.ActorAlign.CENTER,
             });
 
@@ -1212,7 +1210,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         if (!reading?.valid || reading.temperature_c === null)
             return 'Unavailable';
-        return _formatTemperature(reading.temperature_c);
+        return formatTemperature(reading.temperature_c);
     }
 
     _applyAutoPowersaverStatus(status) {
@@ -1228,7 +1226,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
             status.service_health;
         const controlTemperature = status.control_temperature_c === null
             ? 'Unavailable'
-            : _formatTemperature(status.control_temperature_c);
+            : formatTemperature(status.control_temperature_c);
 
         this._autoPowersaverOperatingModeItem.label.text =
             `Operating mode: ${AUTO_OPERATING_MODE_LABELS[operatingMode] ?? operatingMode}`;
@@ -1275,30 +1273,11 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._lastPotentialControllerCount =
             status.potential_competing_controller_count ?? 0;
 
-        const icon = status.service_health !== 'healthy' ||
-            status.telemetry_quality !== 'healthy'
-            ? '!'
-            : {
-                disabled: '○',
-                paused: 'Ⅱ',
-                manual_override: 'M',
-                automatic: status.active_profile === 'powersave' ? '↓' : 'A',
-            }[status.policy_mode] ?? '!';
-        this._autoPowersaverIconLabel.text = icon;
-        this._autoPowersaverTemperatureLabel.text = status.control_temperature_c === null
-            ? '--°C'
-            : _formatTemperature(status.control_temperature_c);
-        let autoVisualState = 'normal';
-
-        if (status.service_health !== 'healthy' || status.telemetry_quality === 'unknown')
-            autoVisualState = 'fault';
-        else if (status.thermal_state === 'hot')
-            autoVisualState = 'hot';
-        else if (status.telemetry_quality === 'degraded')
-            autoVisualState = 'degraded';
-        else if (!status.enabled)
-            autoVisualState = 'disabled';
-        this._setAutoPowersaverVisualState(autoVisualState);
+        const panelPresentation = autoPowersaverPanelPresentation(status);
+        this._autoPowersaverIconLabel.text = panelPresentation.icon;
+        this._autoPowersaverTemperatureLabel.text =
+            panelPresentation.temperatureText;
+        this._setAutoPowersaverVisualState(panelPresentation.visualState);
 
         const enabled = Boolean(status.enabled);
         const canSelectBalanced = enabled && !status.hot_latched &&
@@ -1415,7 +1394,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
                     : transition.reason.replace(/_/g, ' ');
                 const temperature = transition.control_temperature_c === null
                     ? ''
-                    : ` ${_formatTemperature(transition.control_temperature_c)}`;
+                    : ` ${formatTemperature(transition.control_temperature_c)}`;
 
                 return new PopupMenu.PopupMenuItem(
                     `${time}  ${profileChange}${temperature}`, {
@@ -1482,13 +1461,13 @@ class SystemUsageIndicator extends PanelMenu.Button {
             stats = _readMeminfo();
         } catch (error) {
             console.error(`System Usage Monitor: failed to read /proc/meminfo: ${error}`);
-            this._memoryPercentLabel.text = '--%';
+            this._memoryPercentLabel.text = formatPanelPercent(null);
             this._temperatureIconLabel.text = PANEL_TEMPERATURE_NORMAL_LABEL;
             this._temperatureLabel.text = '--°C';
             this._temperatureItem.label.text = 'Hottest: unavailable';
             this._setFanItems({fanOne: null});
             for (const labels of this._storagePanelLabels)
-                labels.percentLabel.text = '--%';
+                labels.percentLabel.text = formatPanelPercent(null);
             this._setLevelClass('unknown');
             return;
         }
@@ -1520,18 +1499,18 @@ class SystemUsageIndicator extends PanelMenu.Button {
             }
         }
 
-        this._memoryPercentLabel.text = `${stats.usedPercent}%`;
+        this._memoryPercentLabel.text = formatPanelPercent(stats.usedPercent);
         this._ramItem.label.text = `RAM: ${_formatKib(stats.used)} / ${_formatKib(stats.total)} (${stats.usedPercent}%)`;
 
         if (temperatureStats.available) {
-            this._temperatureIconLabel.text =
-                temperatureStats.hottest.temperature >= TEMPERATURE_WARNING_THRESHOLD_C
-                    ? PANEL_TEMPERATURE_HIGH_LABEL
-                    : PANEL_TEMPERATURE_NORMAL_LABEL;
-            this._temperatureLabel.text = _formatPanelTemperature(temperatureStats.hottest);
+            this._temperatureIconLabel.text = temperaturePanelIcon(
+                temperatureStats.hottest.temperature,
+                TEMPERATURE_WARNING_THRESHOLD_C);
+            this._temperatureLabel.text = formatPanelTemperature(
+                temperatureStats.hottest);
             this._temperatureItem.label.text =
                 `Hottest: ${temperatureStats.hottest.displayName} ` +
-                `${_formatTemperature(temperatureStats.hottest.temperature)}`;
+                `${formatTemperature(temperatureStats.hottest.temperature)}`;
         } else {
             this._temperatureIconLabel.text = PANEL_TEMPERATURE_NORMAL_LABEL;
             this._temperatureLabel.text = '--°C';
@@ -1542,48 +1521,43 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         storageStats.forEach((storage, index) => {
             if (storage.mounted) {
-                this._storagePanelLabels[index].percentLabel.text = `${storage.usedPercent}%`;
+                this._storagePanelLabels[index].percentLabel.text =
+                    formatPanelPercent(storage.usedPercent);
                 this._storageItems[index].label.text =
                     `${storage.name} (${storage.path}): ${_formatBytes(storage.used)} / ${_formatBytes(storage.total)} ` +
                     `(${storage.usedPercent}%)`;
             } else {
-                this._storagePanelLabels[index].percentLabel.text = '--%';
+                this._storagePanelLabels[index].percentLabel.text =
+                    formatPanelPercent(null);
                 this._storageItems[index].label.text =
                     `${storage.name}: not mounted`;
             }
         });
 
-        let highestUsedPercent = stats.usedPercent;
-
-        for (const storage of storageStats) {
-            if (storage.mounted)
-                highestUsedPercent = Math.max(highestUsedPercent, storage.usedPercent);
-        }
-
         const hottestTemperature =
             temperatureStats.available ? temperatureStats.hottest.temperature : 0;
-
-        if (highestUsedPercent >= CRITICAL_THRESHOLD ||
-            hottestTemperature >= TEMPERATURE_CRITICAL_THRESHOLD_C)
-            this._setLevelClass('critical');
-        else if (highestUsedPercent >= WARNING_THRESHOLD ||
-            hottestTemperature >= TEMPERATURE_WARNING_THRESHOLD_C)
-            this._setLevelClass('warning');
-        else
-            this._setLevelClass('normal');
+        this._setLevelClass(panelLevel(
+            stats.usedPercent,
+            storageStats,
+            hottestTemperature,
+            WARNING_THRESHOLD,
+            CRITICAL_THRESHOLD,
+            TEMPERATURE_WARNING_THRESHOLD_C,
+            TEMPERATURE_CRITICAL_THRESHOLD_C));
     }
 
     _setFanItems({fanOne}) {
-        const showFanOne = fanOne !== null;
+        const showFanOne = shouldShowFan(fanOne, true);
 
         this._fanItem.visible = showFanOne;
-        this._fanSpeedLabel.text = showFanOne ? _formatFanSpeed(fanOne.speed) : '';
-        const showFanInPanel = showFanOne && this._settings.get_boolean(SHOW_FAN_KEY);
+        this._fanSpeedLabel.text = showFanOne ? formatFanSpeed(fanOne.speed) : '';
+        const showFanInPanel = shouldShowFan(
+            fanOne, this._settings.get_boolean(SHOW_FAN_KEY));
 
         this._fanBox.visible = showFanInPanel;
 
         if (showFanOne)
-            this._fanItem.label.text = `${fanOne.name}: ${_formatFanSpeed(fanOne.speed)}`;
+            this._fanItem.label.text = `${fanOne.name}: ${formatFanSpeed(fanOne.speed)}`;
     }
 
     _setLevelClass(level) {

@@ -37,6 +37,15 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Auto-Powersaver tests failed.'
 }
 
+if (-not (Get-Command gjs -ErrorAction SilentlyContinue)) {
+    throw 'gjs is required to validate panel presentation scenarios.'
+}
+
+& gjs -m (Join-Path $SourceDir 'tests/test_panel_presentation.js')
+if ($LASTEXITCODE -ne 0) {
+    throw 'Panel presentation scenario tests failed.'
+}
+
 $PythonFiles = @(
     (Join-Path $SourceDir 'auto_powersaver/core.py'),
     (Join-Path $SourceDir 'auto_powersaver/conflicts.py'),
@@ -59,7 +68,8 @@ if (Test-Path $PackDir) {
 }
 
 New-Item -ItemType Directory -Force -Path $PackDir | Out-Null
-& gnome-extensions pack --force --out-dir $PackDir $SourceDir | Out-Null
+& gnome-extensions pack --force --out-dir $PackDir `
+    --extra-source (Join-Path $SourceDir 'panelPresentation.js') $SourceDir | Out-Null
 
 $InstalledExtensions = & gnome-extensions list 2>$null
 if ($LASTEXITCODE -eq 0 -and $InstalledExtensions -contains $Uuid) {
