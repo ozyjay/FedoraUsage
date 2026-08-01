@@ -78,7 +78,7 @@ can provide status, diagnostics, history and hot protection even when ordinary
 automatic management is off.
 
 | Automatic management | Hot protection while off | Result |
-|---|---:|---|
+| --- | ---: | --- |
 | On | On | Balanced while cool; Power Saver when hot |
 | Off | On | Current or manual profile retained while cool; Power Saver forced when hot |
 | Off | Off | FedoraUsage does not automatically change profiles |

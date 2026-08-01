@@ -35,7 +35,7 @@ the clearer `automatic_management_enabled`,
 ## Automatic management versus hot protection
 
 | Automatic management | Hot protection while off | Result |
-|---|---:|---|
+| --- | ---: | --- |
 | On | On | Balanced while cool; Power Saver when hot |
 | Off | On | Current/manual profile retained while cool; Power Saver forced when hot |
 | Off | Off | FedoraUsage does not automatically change profiles |
