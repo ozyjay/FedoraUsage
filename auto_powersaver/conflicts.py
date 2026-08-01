@@ -12,6 +12,7 @@ from typing import Callable, Iterable
 
 
 MAX_FILES_PER_LOCATION = 256
+MAX_SYSTEMD_FILES_PER_LOCATION = 1024
 MAX_FILE_BYTES = 65_536
 MAX_FINDINGS = 50
 MAX_COMMAND_BYTES = 262_144
@@ -73,10 +74,13 @@ class HostConflictAdapter:
     def begin_scan(self) -> None:
         self.incomplete = False
 
-    def _files(self, directory: Path, patterns: tuple[str, ...]) -> list[Path]:
+    def _files(
+        self, directory: Path, patterns: tuple[str, ...],
+        *, limit: int = MAX_FILES_PER_LOCATION,
+    ) -> list[Path]:
         try:
             paths = sorted({path for pattern in patterns for path in directory.glob(pattern)})
-            if len(paths) > MAX_FILES_PER_LOCATION:
+            if len(paths) > limit:
                 self.incomplete = True
             safe_paths = []
             directory_root = directory.resolve()
@@ -88,17 +92,21 @@ class HostConflictAdapter:
                     safe_paths.append(path)
                 except OSError:
                     self.incomplete = True
-            return safe_paths[:MAX_FILES_PER_LOCATION]
+            return safe_paths[:limit]
         except OSError:
             self.incomplete = True
             return []
 
     def read_text(self, path: Path) -> str | None:
         try:
-            if path.stat().st_size > MAX_FILE_BYTES:
+            with path.open('rb') as handle:
+                value = handle.read(MAX_FILE_BYTES + 1)
+            if value.startswith(b'\x7fELF') or b'\0' in value[:4096]:
+                return None
+            if len(value) > MAX_FILE_BYTES:
                 self.incomplete = True
                 return None
-            return path.read_text(encoding='utf-8', errors='replace')[:MAX_FILE_BYTES]
+            return value.decode('utf-8', errors='replace')
         except OSError:
             self.incomplete = True
             return None
@@ -107,7 +115,9 @@ class HostConflictAdapter:
         values: list[tuple[Path, str, str]] = []
         for directory in self.systemd_locations:
             values.extend((path, 'systemd_unit', 'system') for path in
-                          self._files(directory, ('*.service', '*.timer')))
+                          self._files(
+                              directory, ('*.service', '*.timer'),
+                              limit=MAX_SYSTEMD_FILES_PER_LOCATION))
         for directory in self.script_locations:
             values.extend((path, 'script', 'system') for path in self._files(directory, ('*',)))
         for directory in self.cron_locations:
@@ -124,32 +134,31 @@ class HostConflictAdapter:
             user_units = home / '.config/systemd/user'
             user_autostart = home / '.config/autostart'
             values.extend((path, 'systemd_unit', 'user') for path in
-                          self._files(user_units, ('*.service', '*.timer')))
+                          self._files(
+                              user_units, ('*.service', '*.timer'),
+                              limit=MAX_SYSTEMD_FILES_PER_LOCATION))
             values.extend((path, 'autostart', 'user') for path in
                           self._files(user_autostart, ('*.desktop',)))
         return values
 
-    def systemd_state(self) -> tuple[set[str], set[str], bool]:
-        active: set[str] = set()
-        enabled: set[str] = set()
+    def systemd_state(self) -> tuple[set[tuple[str, str]], set[tuple[str, str]], bool]:
+        active: set[tuple[str, str]] = set()
+        enabled: set[tuple[str, str]] = set()
         complete = True
         commands = [
             (['systemctl', 'list-unit-files', '--type=service', '--type=timer',
-              '--no-legend', '--no-pager'], enabled),
-            (['systemctl', 'list-units', '--type=service', '--all', '--no-legend',
-              '--no-pager'], active),
-            (['systemctl', 'list-timers', '--all', '--no-legend', '--no-pager'], active),
+              '--no-legend', '--no-pager'], 'system', 'enabled'),
+            (['systemctl', 'list-units', '--type=service', '--type=timer', '--all',
+              '--no-legend', '--no-pager'], 'system', 'active'),
         ]
         if os.environ.get('XDG_RUNTIME_DIR'):
             commands.extend([
                 (['systemctl', '--user', 'list-unit-files', '--type=service',
-                  '--type=timer', '--no-legend', '--no-pager'], enabled),
+                  '--type=timer', '--no-legend', '--no-pager'], 'user', 'enabled'),
                 (['systemctl', '--user', 'list-units', '--type=service', '--all',
-                  '--no-legend', '--no-pager'], active),
-                (['systemctl', '--user', 'list-timers', '--all', '--no-legend',
-                  '--no-pager'], active),
+                  '--type=timer', '--no-legend', '--no-pager'], 'user', 'active'),
             ])
-        for command, target in commands:
+        for command, scope, state_kind in commands:
             try:
                 result = subprocess.run(
                     command, check=False, capture_output=True, text=True,
@@ -158,13 +167,16 @@ class HostConflictAdapter:
                 if result.returncode != 0 or len(result.stdout) > MAX_COMMAND_BYTES:
                     complete = False
                 for line in output.splitlines():
-                    for token in line.split():
+                    tokens = line.split()
+                    for index, token in enumerate(tokens):
                         if UNIT_NAME.fullmatch(token):
-                            if target is enabled:
-                                if 'enabled' in line.split():
-                                    target.add(token)
-                            else:
-                                target.add(token)
+                            if state_kind == 'enabled':
+                                if index + 1 < len(tokens) and tokens[index + 1] in {
+                                    'enabled', 'enabled-runtime',
+                                }:
+                                    enabled.add((scope, token))
+                            elif index + 2 < len(tokens) and tokens[index + 2] == 'active':
+                                active.add((scope, token))
                             break
             except (OSError, subprocess.SubprocessError):
                 complete = False
@@ -178,7 +190,7 @@ class HostConflictAdapter:
             names = sorted({
                 name for name, unit_scope in units
                 if unit_scope == scope and UNIT_NAME.fullmatch(name)
-            })[:MAX_FILES_PER_LOCATION]
+            })[:MAX_SYSTEMD_FILES_PER_LOCATION]
             if not names or (scope == 'user' and not os.environ.get('XDG_RUNTIME_DIR')):
                 continue
             command = ['systemctl']
@@ -256,9 +268,9 @@ class ConflictScanner:
                     continue
                 properties = unit_details.get(f'{scope}:{path.name}', {})
                 if properties.get('ActiveState') == 'active':
-                    active.add(path.name)
+                    active.add((scope, path.name))
                 if properties.get('UnitFileState') in {'enabled', 'enabled-runtime'}:
-                    enabled.add(path.name)
+                    enabled.add((scope, path.name))
                 if path in candidate_text and properties.get('ExecStart'):
                     candidate_text[path] += f"\n{properties['ExecStart']}"
         unit_text_by_name = {
@@ -295,8 +307,8 @@ class ConflictScanner:
             known = KNOWN_UNITS.get(path.name)
             if not evidence and not known:
                 continue
-            is_active = path.name in active
-            is_enabled = path.name in enabled
+            is_active = (scope, path.name) in active
+            is_enabled = (scope, path.name) in enabled
             if known:
                 evidence.insert(0, known)
             high = bool(evidence and (is_active or is_enabled))

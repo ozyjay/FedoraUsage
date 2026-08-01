@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ElementTree
 
 from auto_powersaver.core import Config, PolicyController, PolicyError, SensorReading
@@ -495,8 +496,17 @@ class ConfigurationFileTests(unittest.TestCase):
 class FakeConflictAdapter:
     def __init__(self, candidates, *, active=(), enabled=(), incomplete=False):
         self._candidates = candidates
-        self._active = set(active)
-        self._enabled = set(enabled)
+        scopes = {
+            Path(name).name: scope for name, _kind, scope, _text in candidates
+        }
+        self._active = {
+            value if isinstance(value, tuple) else (scopes[value], value)
+            for value in active
+        }
+        self._enabled = {
+            value if isinstance(value, tuple) else (scopes[value], value)
+            for value in enabled
+        }
         self.incomplete = incomplete
 
     def candidates(self):
@@ -619,6 +629,63 @@ class ConflictScannerTests(unittest.TestCase):
         result = self.scan([], incomplete=True)
         self.assertFalse(result['scan_complete'])
         self.assertEqual(result['status'], 'scan_incomplete')
+
+    def test_system_and_user_unit_states_do_not_collide(self) -> None:
+        result = self.scan([
+            ('/etc/systemd/system/custom-power.service', 'systemd_unit', 'system',
+             'ExecStart=tuned-adm profile powersave'),
+            ('/home/test/.config/systemd/user/custom-power.service',
+             'systemd_unit', 'user', 'ExecStart=tuned-adm profile powersave'),
+        ], active=(('user', 'custom-power.service'),))
+        findings = {
+            item['scope']: item for item in result['potential_competing_controllers']
+        }
+        self.assertFalse(findings['system']['active'])
+        self.assertTrue(findings['user']['active'])
+
+    def test_host_adapter_parses_only_active_systemd_units(self) -> None:
+        outputs = iter([
+            'active.service enabled enabled\ninactive.service disabled disabled\n',
+            'active.service loaded active running Active\n'
+            'inactive.service loaded inactive dead Inactive\n',
+        ])
+
+        def run(*_args, **_kwargs):
+            return subprocess.CompletedProcess([], 0, next(outputs), '')
+
+        adapter = HostConflictAdapter()
+        with patch.dict('os.environ', {'XDG_RUNTIME_DIR': ''}), patch(
+            'auto_powersaver.conflicts.subprocess.run', side_effect=run,
+        ):
+            active, enabled, complete = adapter.systemd_state()
+
+        self.assertTrue(complete)
+        self.assertEqual(active, {('system', 'active.service')})
+        self.assertEqual(enabled, {('system', 'active.service')})
+
+    def test_host_adapter_skips_large_binary_without_incomplete_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            binary = Path(temporary_directory) / 'controller'
+            binary.write_bytes(b'\x7fELF\0' + b'x' * 70_000)
+            adapter = HostConflictAdapter()
+            self.assertIsNone(adapter.read_text(binary))
+            self.assertFalse(adapter.incomplete)
+
+    def test_systemd_location_uses_larger_bounded_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            units = root / 'units'
+            units.mkdir()
+            (root / 'homes').mkdir()
+            for index in range(257):
+                (units / f'test-{index}.service').touch()
+            adapter = HostConflictAdapter(
+                systemd_locations=(units,), script_locations=(),
+                cron_locations=(), autostart_locations=(),
+                user_homes_root=root / 'homes')
+            candidates = adapter.candidates()
+        self.assertEqual(len(candidates), 257)
+        self.assertFalse(adapter.incomplete)
 
     def test_host_adapter_does_not_follow_candidates_outside_allowlisted_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

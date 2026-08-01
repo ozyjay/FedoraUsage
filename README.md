@@ -48,7 +48,8 @@ Framework Computer Inc.
   external TuneD changes as temporary manual overrides while safely cool.
 - Separately reports ordinary automatic management, hot protection while it is
   off, root-service availability, external profile changes and potential
-  competing controllers.
+  competing controllers. Conflict scans distinguish system and user unit state,
+  ignore non-script binaries and report when a bounded location was truncated.
 
 ## Auto-Powersaver
 
