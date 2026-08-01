@@ -29,7 +29,7 @@
 
 .system-usage-percent {
   width: 3em;
-  text-align: center;
+  text-align: left;
 }
 
 .system-usage-temperature-value {
@@ -39,7 +39,7 @@
 
 .system-usage-fan-speed {
   width: 6.5em;
-  text-align: center;
+  text-align: left;
 }
 
 /* Accommodates a sensor-type icon and temperatures from -50°C to 150°C. */

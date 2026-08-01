@@ -505,8 +505,8 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertIn('.system-usage-temperature-value', stylesheet_source)
         self.assertIn('.system-usage-fan-speed', stylesheet_source)
         self.assertIn("return `${sensor.friendlyIcon} ", extension_source)
-        self.assertIn('spacing: 0', stylesheet_source)
-        self.assertIn('text-align: center', stylesheet_source)
+        self.assertIn('spacing: 0.1em', stylesheet_source)
+        self.assertIn('text-align: left', stylesheet_source)
 
     def test_privilege_policy_xml_is_well_formed(self) -> None:
         for path in [
