@@ -484,6 +484,16 @@ class ConfigurationFileTests(unittest.TestCase):
         ]
         positions = [extension_source.index(line) for line in ordered_additions]
         self.assertEqual(positions, sorted(positions))
+        ordered_menu_additions = [
+            'this.menu.addMenuItem(this._fanItem);',
+            'this.menu.addMenuItem(this._ramItem);',
+            'this.menu.addMenuItem(item);',
+            'this.menu.addMenuItem(this._temperatureItem);',
+        ]
+        menu_positions = [
+            extension_source.index(line) for line in ordered_menu_additions
+        ]
+        self.assertEqual(menu_positions, sorted(menu_positions))
         self.assertNotIn('set_child_at_index', extension_source)
         self.assertIn('system-usage-hottest-temperature', stylesheet_source)
         self.assertIn("style_class: 'system-usage-field'", extension_source)

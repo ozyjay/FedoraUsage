@@ -899,11 +899,11 @@ class SystemUsageIndicator extends PanelMenu.Button {
                 can_focus: false,
             }));
 
-        this.menu.addMenuItem(this._ramItem);
-        this.menu.addMenuItem(this._temperatureItem);
         this.menu.addMenuItem(this._fanItem);
+        this.menu.addMenuItem(this._ramItem);
         for (const item of this._storageItems)
             this.menu.addMenuItem(item);
+        this.menu.addMenuItem(this._temperatureItem);
     }
 
     _createAutoPowersaverMenu() {

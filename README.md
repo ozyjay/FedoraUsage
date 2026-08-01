@@ -3,8 +3,8 @@
 A GNOME Shell system monitor built for Framework Desktop and compatible with
 other computers running Fedora 44 Workstation. It shows configurable RAM,
 temperature, active fan speed and filesystem readings in the top bar, with
-an at-a-glance RAM, temperature, primary fan and storage summary in a dropdown
-menu.
+an at-a-glance primary fan, RAM, storage and temperature summary in the same
+order in a dropdown menu.
 It can also manage a host-level Auto-Powersaver policy through a separately
 installed root system service while the extension itself remains unprivileged.
 
