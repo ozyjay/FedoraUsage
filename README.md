@@ -46,6 +46,9 @@ Framework Computer Inc.
   `balanced` only after validated hysteresis, dwell and consecutive readings.
 - Keeps hot protection active during pause and manual override, and respects
   external TuneD changes as temporary manual overrides while safely cool.
+- Separately reports ordinary automatic management, hot protection while it is
+  off, root-service availability, external profile changes and potential
+  competing controllers.
 
 ## Auto-Powersaver
 
@@ -66,6 +69,34 @@ a narrow D-Bus API and Polkit authorisation. Policy fields in the extension
 preferences are saved together with the **Apply** button. Live service updates
 continue to refresh diagnostics without replacing policy edits that have not
 yet been applied.
+
+### Automatic management versus hot protection
+
+Auto-Powersaver is a FedoraUsage policy, not a TuneD profile. GNOME Settings
+shows only its underlying `balanced` or `powersave` profile. The root service
+can provide status, diagnostics, history and hot protection even when ordinary
+automatic management is off.
+
+| Automatic management | Hot protection while off | Result |
+|---|---:|---|
+| On | On | Balanced while cool; Power Saver when hot |
+| Off | On | Current or manual profile retained while cool; Power Saver forced when hot |
+| Off | Off | FedoraUsage does not automatically change profiles |
+| On | Off | Protection-while-off setting is inactive while automatic management is on |
+
+The safe default is to keep hot protection enabled. Turning it off is a
+separate, warned and Polkit-authorised operation in Preferences or the CLI.
+Turning ordinary management off does not stop the service. Administrators can
+stop it separately with:
+
+```bash
+sudo systemctl disable --now fedorausage-auto-powersaver.service
+```
+
+TuneD, FedoraUsage policy, GNOME's profile UI, kernel thermal throttling,
+firmware controls and hardware protections are separate layers. The policy's
+control temperature is the maximum of its approved control sensors and need
+not be the hottest general sensor shown by the extension.
 
 See [Auto-Powersaver architecture and operations](docs/auto-powersaver.md) for
 state behaviour, CLI commands, configuration, migration, troubleshooting,

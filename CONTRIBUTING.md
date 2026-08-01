@@ -90,6 +90,13 @@ Polkit action into arbitrary command, sensor-path, profile or unit control.
 Keep persistent configuration under `/etc` separate from temporary state under
 `/run`.
 
+Competing-controller diagnostics must remain read-only and use fixed,
+allowlisted locations and systemctl properties. Bound file counts, file sizes,
+subprocess output and findings; validate unit names; never expose arbitrary
+paths or unit inspection over D-Bus. Tests must use fake filesystem/systemd
+adapters and must not modify host services, timers, cron, autostart entries or
+profiles.
+
 Installing or manually testing the service changes the host and is not part of
 normal validation. Follow the explicit opt-in checklist in
 `docs/auto-powersaver.md`, capture an audit, and restore the original enabled

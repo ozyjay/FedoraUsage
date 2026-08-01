@@ -16,6 +16,19 @@ const AUTO_POWERSAVER_BUS_NAME =
 const AUTO_POWERSAVER_OBJECT_PATH =
     '/net/crunchycodes/FedoraUsage/AutoPowersaver1';
 const AUTO_POWERSAVER_INTERFACE = AUTO_POWERSAVER_BUS_NAME;
+const AUTO_REASON_LABELS = {
+    automatic_normal: 'Automatic — cool',
+    automatic_hot: 'Automatic — hot',
+    hot_protection_while_disabled: 'Hot protection',
+    manual_override: 'Manual override',
+    external_profile_change: 'External profile change',
+    forced_power_saver: 'Forced Power Saver',
+    forced_balanced: 'Forced Balanced',
+    recovery: 'Recovery',
+    profile_unchanged: 'External or unchanged',
+    tuned_unavailable: 'TuneD unavailable',
+    telemetry_unknown: 'Telemetry unknown',
+};
 
 const PANEL_ITEMS = [
     ['show-memory-in-panel', 'Memory', 'Show current memory use'],
@@ -129,13 +142,21 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         page.add(group);
 
         const autoGroup = new Adw.PreferencesGroup({
-            title: 'Auto-Powersaver',
+            title: 'Auto-Powersaver policy',
             description: 'Controls the root-owned system policy service through D-Bus. Changes may require administrator authentication.',
         });
         const autoEnabledRow = new Adw.SwitchRow({
-            title: 'Enable Auto-Powersaver',
-            subtitle: 'Automatically select Balanced or Power Saver from temperature',
+            title: 'Automatically manage power profile',
+            subtitle: 'Use Balanced while cool and Power Saver when the hot threshold is reached',
             sensitive: false,
+        });
+        const hotProtectionRow = new Adw.SwitchRow({
+            title: 'Keep thermal protection active when automatic management is off',
+            subtitle: 'Power Saver may still be selected at the hot threshold when automatic management is disabled',
+            sensitive: false,
+        });
+        const protectionExplanationRow = new Adw.ActionRow({
+            title: 'Turning automatic management off does not disable hot protection unless the setting below is also turned off.',
         });
         const hotAdjustment = new Gtk.Adjustment({
             lower: 40,
@@ -230,6 +251,16 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         });
         applyPolicyRow.add_suffix(applyPolicyButton);
         applyPolicyRow.activatable_widget = applyPolicyButton;
+        const disablePolicyRow = new Adw.ActionRow({
+            title: 'Disable automatic management and hot protection',
+            subtitle: 'Leaves the root service running and the current TuneD profile unchanged',
+        });
+        const disablePolicyButton = new Gtk.Button({
+            label: 'Disable both…',
+            valign: Gtk.Align.CENTER,
+        });
+        disablePolicyRow.add_suffix(disablePolicyButton);
+        disablePolicyRow.activatable_widget = disablePolicyButton;
         const showGpuRow = new Adw.SwitchRow({
             title: 'Show GPU temperature',
             subtitle: 'Display the diagnostic-only amdgpu edge reading in the menu',
@@ -247,6 +278,8 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
 
         for (const row of [
             autoEnabledRow,
+            protectionExplanationRow,
+            hotProtectionRow,
             hotRow,
             recoveryRow,
             dwellRow,
@@ -256,6 +289,7 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             degradedRow,
             disableBehaviourRow,
             applyPolicyRow,
+            disablePolicyRow,
             showGpuRow,
             notificationsRow,
         ])
@@ -266,12 +300,16 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             description: 'Live read-only state reported by the system service.',
         });
         const diagnosticRows = new Map([
+            ['automatic_management_enabled', new Adw.ActionRow({title: 'Automatic management', subtitle: 'Unavailable'})],
+            ['hot_protection_when_disabled', new Adw.ActionRow({title: 'Hot protection while off', subtitle: 'Unavailable'})],
+            ['service_running', new Adw.ActionRow({title: 'Root service', subtitle: 'Unavailable'})],
             ['policy_mode', new Adw.ActionRow({title: 'Policy mode', subtitle: 'Unavailable'})],
             ['thermal_state', new Adw.ActionRow({title: 'Thermal state', subtitle: 'Unknown'})],
             ['telemetry_quality', new Adw.ActionRow({title: 'Control sensor health', subtitle: 'Unknown'})],
             ['service_health', new Adw.ActionRow({title: 'Service health', subtitle: 'Service unavailable'})],
             ['control_temperature_c', new Adw.ActionRow({title: 'Control temperature', subtitle: 'Unavailable'})],
             ['active_profile', new Adw.ActionRow({title: 'Current TuneD profile', subtitle: 'Unavailable'})],
+            ['effective_profile_reason', new Adw.ActionRow({title: 'Effective profile reason', subtitle: 'Unknown'})],
             ['last_transition', new Adw.ActionRow({title: 'Last transition', subtitle: 'None'})],
             ['last_error', new Adw.ActionRow({title: 'Last service error', subtitle: 'None'})],
         ]);
@@ -279,6 +317,37 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             diagnosticsGroup.add(row);
         page.add(autoGroup);
         page.add(diagnosticsGroup);
+
+        const externalGroup = new Adw.PreferencesGroup({
+            title: 'External-control diagnostics',
+            description: 'Bounded, read-only checks; FedoraUsage never changes detected controllers.',
+        });
+        const externalChangesRow = new Adw.ActionRow({
+            title: 'External profile changes observed',
+            subtitle: 'Unavailable',
+        });
+        const competingControllersRow = new Adw.ActionRow({
+            title: 'Competing power controllers',
+            subtitle: 'Not scanned',
+        });
+        const conflictScanRow = new Adw.ActionRow({
+            title: 'Conflict scan',
+            subtitle: 'Not scanned',
+        });
+        const conflictDetailsRow = new Adw.ExpanderRow({
+            title: 'Potential controller details',
+            subtitle: 'No findings loaded',
+        });
+        let conflictDetailRows = [];
+        const rescanButton = new Gtk.Button({label: 'Rescan', valign: Gtk.Align.CENTER});
+        conflictScanRow.add_suffix(rescanButton);
+        conflictScanRow.activatable_widget = rescanButton;
+        for (const row of [
+            externalChangesRow, competingControllersRow, conflictScanRow,
+            conflictDetailsRow,
+        ])
+            externalGroup.add(row);
+        page.add(externalGroup);
 
         let autoProxy = null;
         let updatingAutoRows = false;
@@ -305,9 +374,9 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
 
         const setPolicySensitive = sensitive => {
             for (const row of [
-                autoEnabledRow, hotRow, recoveryRow, dwellRow, readingCountRow,
+                autoEnabledRow, hotProtectionRow, hotRow, recoveryRow, dwellRow, readingCountRow,
                 pollRow, overrideRow, degradedRow, disableBehaviourRow,
-                applyPolicyRow,
+                applyPolicyRow, disablePolicyRow,
             ])
                 row.sensitive = sensitive;
         };
@@ -315,6 +384,7 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             currentAutoStatus = status;
             updatingAutoRows = true;
             autoEnabledRow.active = Boolean(status.enabled);
+            hotProtectionRow.active = Boolean(status.hot_protection_when_disabled);
             if (!policyRowsDirty) {
                 hotAdjustment.value = status.hot_threshold_c;
                 recoveryAdjustment.value = status.recovery_threshold_c;
@@ -329,6 +399,13 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             }
             updatingAutoRows = false;
             setPolicySensitive(true);
+
+            diagnosticRows.get('automatic_management_enabled').subtitle =
+                status.automatic_management_enabled ? 'On' : 'Off';
+            diagnosticRows.get('hot_protection_when_disabled').subtitle =
+                status.hot_protection_when_disabled ? 'On' : 'Off';
+            diagnosticRows.get('service_running').subtitle =
+                status.service_running ? 'Running' : 'Unavailable';
 
             diagnosticRows.get('policy_mode').subtitle =
                 status.policy_mode.replace(/_/g, ' ');
@@ -345,9 +422,22 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
                     : `${status.control_temperature_c.toFixed(1)}°C`;
             diagnosticRows.get('active_profile').subtitle =
                 status.active_profile ?? 'Unavailable';
+            diagnosticRows.get('effective_profile_reason').subtitle =
+                AUTO_REASON_LABELS[status.effective_profile_reason] ??
+                status.effective_profile_reason?.replace(/_/g, ' ') ?? 'Unknown';
             diagnosticRows.get('last_transition').subtitle =
                 status.last_transition?.reason?.replace(/_/g, ' ') ?? 'None';
             diagnosticRows.get('last_error').subtitle = status.last_error ?? 'None';
+            externalChangesRow.subtitle = status.external_profile_change_observed
+                ? `Yes (${status.external_change_count})`
+                : 'No';
+            const count = status.potential_competing_controller_count ?? 0;
+            competingControllersRow.subtitle = count === 0
+                ? 'None detected'
+                : `${count} potential conflict${count === 1 ? '' : 's'}`;
+            conflictScanRow.subtitle = status.conflict_scan_timestamp
+                ? `${status.conflict_scan_status.replace(/_/g, ' ')} — ${status.conflict_scan_timestamp}`
+                : status.conflict_scan_status?.replace(/_/g, ' ') ?? 'Not scanned';
         };
         const callService = (method, parameters = null, callback = null) => {
             if (!autoProxy)
@@ -388,6 +478,87 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
                             currentAutoStatus?.poll_interval_seconds * 2,
                     ]));
         });
+        hotProtectionRow.connect('notify::active', () => {
+            if (updatingAutoRows)
+                return;
+            if (hotProtectionRow.active) {
+                callService(
+                    'SetHotProtectionWhenDisabled',
+                    new GLib.Variant('(b)', [true]));
+                return;
+            }
+            updatingAutoRows = true;
+            hotProtectionRow.active = true;
+            updatingAutoRows = false;
+            const dialog = new Adw.AlertDialog({
+                heading: 'Disable thermal protection?',
+                body: 'Disabling thermal protection means FedoraUsage will no longer switch to Power Saver when the configured hot threshold is reached while automatic management is off. Hardware and firmware protections remain independent, but FedoraUsage will stop providing this additional safeguard.',
+            });
+            dialog.add_response('cancel', 'Cancel');
+            dialog.add_response('disable', 'Disable protection');
+            dialog.set_response_appearance('disable', Adw.ResponseAppearance.DESTRUCTIVE);
+            dialog.set_default_response('cancel');
+            dialog.set_close_response('cancel');
+            dialog.choose(window, null, (_dialog, result) => {
+                if (dialog.choose_finish(result) === 'disable')
+                    callService(
+                        'SetHotProtectionWhenDisabled',
+                        new GLib.Variant('(b)', [false]));
+            });
+        });
+        disablePolicyButton.connect('clicked', () => {
+            const dialog = new Adw.AlertDialog({
+                heading: 'Disable both policy behaviours?',
+                body: 'FedoraUsage will stop automatically changing profiles, including at the hot threshold. The root service will keep running for status, diagnostics and future re-enablement.',
+            });
+            dialog.add_response('cancel', 'Cancel');
+            dialog.add_response('disable', 'Disable both');
+            dialog.set_response_appearance('disable', Adw.ResponseAppearance.DESTRUCTIVE);
+            dialog.set_default_response('cancel');
+            dialog.set_close_response('cancel');
+            dialog.choose(window, null, (_dialog, result) => {
+                if (dialog.choose_finish(result) === 'disable')
+                    callService('DisablePolicy', new GLib.Variant('(b)', [false]));
+            });
+        });
+        const applyConflictStatus = conflict => {
+            const count = conflict.potential_competing_controller_count ?? 0;
+            competingControllersRow.subtitle = count === 0
+                ? 'None detected'
+                : `${count} potential conflict${count === 1 ? '' : 's'}`;
+            conflictScanRow.subtitle =
+                `${conflict.status.replace(/_/g, ' ')} — ${conflict.scan_timestamp}`;
+            conflictDetailsRow.subtitle = conflict.scan_complete
+                ? `${count} bounded finding${count === 1 ? '' : 's'}`
+                : 'Partial scan; some locations or status data were unavailable';
+            for (const child of conflictDetailRows)
+                conflictDetailsRow.remove(child);
+            conflictDetailRows = (conflict.potential_competing_controllers ?? []).map(
+                finding => new Adw.ActionRow({
+                    title: finding.name,
+                    subtitle: `${finding.scope}; ${finding.type}; ${finding.active ? 'active' : 'inactive'}; ${finding.enabled ? 'enabled' : 'not enabled'}; ${finding.confidence} confidence; ${finding.risk}; ${finding.evidence.join('; ')}${finding.safe_inspection_commands.length > 0 ? `; Inspect: ${finding.safe_inspection_commands.join(' ; ')}` : ''}`,
+                }));
+            for (const child of conflictDetailRows)
+                conflictDetailsRow.add_row(child);
+        };
+        const loadConflictStatus = (method = 'GetConflictStatus') => {
+            if (!autoProxy)
+                return;
+            rescanButton.sensitive = false;
+            autoProxy.call(
+                method, null, Gio.DBusCallFlags.NONE, 120000, null,
+                (proxy, result) => {
+                    try {
+                        const [payload] = proxy.call_finish(result).deepUnpack();
+                        applyConflictStatus(JSON.parse(payload));
+                    } catch (error) {
+                        conflictScanRow.subtitle = `Rescan failed: ${error.message}`;
+                    } finally {
+                        rescanButton.sensitive = true;
+                    }
+                });
+        };
+        rescanButton.connect('clicked', () => loadConflictStatus('RescanConflicts'));
         applyPolicyButton.connect('clicked', () => {
             const hot = hotAdjustment.value;
             const recovery = recoveryAdjustment.value;
@@ -442,6 +613,7 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
                         applyStatus(JSON.parse(payload));
                     });
                     callService('GetStatus');
+                    loadConflictStatus();
                 } catch (error) {
                     autoGroup.description =
                         `Auto-Powersaver service unavailable: ${error.message}`;

@@ -63,7 +63,22 @@ const AUTO_HEALTH_LABELS = {
     healthy: 'Healthy',
     service_unavailable: 'Service unavailable',
     tuned_unavailable: 'TuneD unavailable',
+    telemetry_unknown: 'Telemetry unknown',
     fault: 'Fault',
+};
+
+const AUTO_REASON_LABELS = {
+    automatic_normal: 'Automatic — cool',
+    automatic_hot: 'Automatic — hot',
+    hot_protection_while_disabled: 'Hot protection',
+    manual_override: 'Manual override',
+    external_profile_change: 'External profile change',
+    forced_power_saver: 'Forced Power Saver',
+    forced_balanced: 'Forced Balanced',
+    recovery: 'Recovery',
+    profile_unchanged: 'External or unchanged',
+    tuned_unavailable: 'TuneD unavailable',
+    starting: 'Starting',
 };
 
 const STORAGE_FILESYSTEMS = [
@@ -747,6 +762,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverStatus = null;
         this._updatingAutoPowersaverSwitch = false;
         this._lastAutoPowersaverNotificationAt = 0;
+        this._lastPotentialControllerCount = 0;
 
         // PanelMenu.Button handles pointer input through this gesture, before
         // legacy button events reach the actor.
@@ -881,9 +897,19 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         this._autoPowersaverSeparator = new PopupMenu.PopupSeparatorMenuItem();
         this._autoPowersaverSwitch = new PopupMenu.PopupSwitchMenuItem(
-            'Auto-Powersaver', false);
+            'Automatically manage power profile', false);
+        this._autoPowersaverProtectionItem =
+            this._createStatusItem('Thermal protection while off');
+        this._autoPowersaverProtectionExplanationItem =
+            new PopupMenu.PopupMenuItem(
+                'Automatic management is off; hot protection remains active.', {
+                    reactive: false,
+                    can_focus: false,
+                });
+        this._autoPowersaverServiceItem = this._createStatusItem('Root service');
         this._autoPowersaverModeItem = this._createStatusItem('Mode');
         this._autoPowersaverThermalItem = this._createStatusItem('Thermal state');
+        this._autoPowersaverTelemetryItem = this._createStatusItem('Telemetry quality');
         this._autoPowersaverHealthItem = this._createStatusItem('Service health');
         this._autoPowersaverControlTemperatureItem =
             this._createStatusItem('Control temperature');
@@ -893,6 +919,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverGpuItem = this._createStatusItem('GPU edge');
         this._autoPowersaverThresholdsItem = this._createStatusItem('Thresholds');
         this._autoPowersaverReasonItem = this._createStatusItem('Reason');
+        this._autoPowersaverExternalItem = this._createStatusItem('External changes observed');
+        this._autoPowersaverConflictsItem = this._createStatusItem('Potential competing controllers');
         this._autoPowersaverPause15Item =
             new PopupMenu.PopupMenuItem('Pause for 15 minutes');
         this._autoPowersaverPause60Item =
@@ -921,8 +949,12 @@ class SystemUsageIndicator extends PanelMenu.Button {
         for (const item of [
             this._autoPowersaverSeparator,
             this._autoPowersaverSwitch,
+            this._autoPowersaverProtectionItem,
+            this._autoPowersaverProtectionExplanationItem,
+            this._autoPowersaverServiceItem,
             this._autoPowersaverModeItem,
             this._autoPowersaverThermalItem,
+            this._autoPowersaverTelemetryItem,
             this._autoPowersaverHealthItem,
             this._autoPowersaverControlTemperatureItem,
             this._autoPowersaverProfileItem,
@@ -931,6 +963,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._autoPowersaverGpuItem,
             this._autoPowersaverThresholdsItem,
             this._autoPowersaverReasonItem,
+            this._autoPowersaverExternalItem,
+            this._autoPowersaverConflictsItem,
             new PopupMenu.PopupSeparatorMenuItem(),
             this._autoPowersaverPause15Item,
             this._autoPowersaverPause60Item,
@@ -1188,8 +1222,15 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverSwitch.setToggleState(Boolean(status.enabled));
         this._updatingAutoPowersaverSwitch = false;
         this._autoPowersaverSwitch.setSensitive(true);
+        this._autoPowersaverProtectionItem.label.text =
+            `Thermal protection while off: ${status.hot_protection_when_disabled ? 'Enabled' : 'Disabled'}`;
+        this._autoPowersaverProtectionExplanationItem.visible =
+            !status.automatic_management_enabled && status.hot_protection_when_disabled;
+        this._autoPowersaverServiceItem.label.text = 'Root service: Running';
         this._autoPowersaverModeItem.label.text = `Mode: ${mode}`;
         this._autoPowersaverThermalItem.label.text = `Thermal state: ${thermal}`;
+        this._autoPowersaverTelemetryItem.label.text =
+            `Telemetry quality: ${status.telemetry_quality.replace(/_/g, ' ')}`;
         this._autoPowersaverHealthItem.label.text = `Service health: ${health}`;
         this._autoPowersaverControlTemperatureItem.label.text =
             `Control temperature: ${controlTemperature}`;
@@ -1205,7 +1246,28 @@ class SystemUsageIndicator extends PanelMenu.Button {
             `Thresholds: ${status.hot_threshold_c}°C hot / ` +
             `${status.recovery_threshold_c}°C recovery`;
         this._autoPowersaverReasonItem.label.text =
-            `Reason: ${(status.effective_profile_reason ?? 'Unknown').replace(/_/g, ' ')}`;
+            `Reason: ${AUTO_REASON_LABELS[status.effective_profile_reason] ?? (status.effective_profile_reason ?? 'Unknown').replace(/_/g, ' ')}`;
+        this._autoPowersaverExternalItem.label.text =
+            `External changes observed: ${status.external_profile_change_observed ? `Yes (${status.external_change_count})` : 'No'}`;
+        this._autoPowersaverConflictsItem.label.text =
+            `Potential competing controllers: ${status.potential_competing_controller_count ?? 0}`;
+
+        if (
+            status.potential_competing_controller_count > this._lastPotentialControllerCount
+        ) {
+            const now = GLib.get_monotonic_time();
+            if (
+                this._settings.get_boolean(AUTO_POWERSAVER_NOTIFICATIONS_KEY) &&
+                now - this._lastAutoPowersaverNotificationAt >= 60 * 1000 * 1000
+            ) {
+                this._lastAutoPowersaverNotificationAt = now;
+                Main.notify(
+                    'Auto-Powersaver',
+                    `Potential competing power controller detected (${status.potential_competing_controller_count}).`);
+            }
+        }
+        this._lastPotentialControllerCount =
+            status.potential_competing_controller_count ?? 0;
 
         const icon = status.service_health !== 'healthy' ||
             status.telemetry_quality !== 'healthy'
@@ -1275,7 +1337,12 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._updatingAutoPowersaverSwitch = false;
         this._autoPowersaverSwitch.setSensitive(false);
         this._autoPowersaverModeItem.label.text = 'Mode: Unavailable';
+        this._autoPowersaverProtectionItem.label.text =
+            'Thermal protection while off: Unavailable';
+        this._autoPowersaverProtectionExplanationItem.visible = false;
+        this._autoPowersaverServiceItem.label.text = 'Root service: Unavailable';
         this._autoPowersaverThermalItem.label.text = 'Thermal state: Unknown';
+        this._autoPowersaverTelemetryItem.label.text = 'Telemetry quality: Unknown';
         this._autoPowersaverHealthItem.label.text =
             'Service health: Service unavailable';
         this._autoPowersaverControlTemperatureItem.label.text =
@@ -1366,7 +1433,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
     _notifyAutoPowersaverTransition(transition) {
         if (!this._settings.get_boolean(AUTO_POWERSAVER_NOTIFICATIONS_KEY))
             return;
-        if (!['safety', 'recovery', 'fault'].includes(transition.trigger_source))
+        if (!['safety', 'recovery', 'fault', 'external'].includes(transition.trigger_source))
             return;
         const now = GLib.get_monotonic_time();
 
@@ -1380,10 +1447,23 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         if (!transition.success) {
             message = `A profile transition failed${temperature}.`;
+        } else if (transition.reason === 'hot_protection_while_disabled') {
+            message = `Hot protection selected Power Saver${temperature}.`;
+        } else if (transition.reason === 'automatic_hot') {
+            message = `Automatic management selected Power Saver${temperature}.`;
+        } else if (transition.reason === 'recovery') {
+            message = `Automatic management returned to Balanced${temperature} after validated recovery.`;
+        } else if (transition.reason === 'external_profile_change') {
+            const profile = transition.resulting_profile === 'powersave'
+                ? 'Power Saver'
+                : transition.resulting_profile === 'balanced'
+                    ? 'Balanced'
+                    : transition.resulting_profile;
+            message = `An external TuneD profile change selected ${profile}.`;
         } else if (transition.resulting_profile === 'powersave') {
-            message = `Power Saver was enabled${temperature}.`;
+            message = `Power Saver was selected${temperature}.`;
         } else if (transition.resulting_profile === 'balanced') {
-            message = `Balanced was restored${temperature}.`;
+            message = `Balanced was selected${temperature}.`;
         } else {
             return;
         }

@@ -27,7 +27,8 @@ rm -f -- /usr/share/dbus-1/system-services/net.crunchycodes.FedoraUsage.AutoPowe
 rm -f -- /usr/share/dbus-1/system.d/net.crunchycodes.FedoraUsage.AutoPowersaver1.conf
 rm -f -- /usr/share/polkit-1/actions/net.crunchycodes.fedorausage.policy
 rm -f -- /usr/libexec/fedorausage-auto-powersaver /usr/bin/fedorausage
-rm -f -- /usr/lib/fedorausage/__init__.py /usr/lib/fedorausage/core.py
+rm -f -- /usr/lib/fedorausage/__init__.py /usr/lib/fedorausage/core.py \
+    /usr/lib/fedorausage/conflicts.py
 rmdir --ignore-fail-on-non-empty /usr/lib/fedorausage
 rm -rf -- /run/fedorausage-auto-powersaver
 if [[ ${remove_config} == true ]]; then

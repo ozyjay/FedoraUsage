@@ -34,6 +34,7 @@ try:
         PolicyError,
         SensorReading,
     )
+    from auto_powersaver.conflicts import ConflictScanner  # noqa: E402
 except ModuleNotFoundError:
     from fedorausage.core import (  # type: ignore[no-redef]  # noqa: E402
         ALLOWED_PROFILES,
@@ -44,6 +45,7 @@ except ModuleNotFoundError:
         PolicyError,
         SensorReading,
     )
+    from fedorausage.conflicts import ConflictScanner  # type: ignore[no-redef]  # noqa: E402
 
 
 BUS_NAME = 'net.crunchycodes.FedoraUsage.AutoPowersaver1'
@@ -63,6 +65,12 @@ INTROSPECTION_XML = f'''<node>
     <method name="GetRecentTransitions">
       <arg name="limit" type="u" direction="in"/>
       <arg name="history_json" type="s" direction="out"/>
+    </method>
+    <method name="GetConflictStatus">
+      <arg name="conflict_json" type="s" direction="out"/>
+    </method>
+    <method name="RescanConflicts">
+      <arg name="conflict_json" type="s" direction="out"/>
     </method>
     <method name="Enable"><arg name="status_json" type="s" direction="out"/></method>
     <method name="Disable">
@@ -96,6 +104,14 @@ INTROSPECTION_XML = f'''<node>
     </method>
     <method name="SetDisableBehaviour">
       <arg name="behaviour" type="s" direction="in"/>
+      <arg name="status_json" type="s" direction="out"/>
+    </method>
+    <method name="SetHotProtectionWhenDisabled">
+      <arg name="enabled" type="b" direction="in"/>
+      <arg name="status_json" type="s" direction="out"/>
+    </method>
+    <method name="DisablePolicy">
+      <arg name="restore_balanced" type="b" direction="in"/>
       <arg name="status_json" type="s" direction="out"/>
     </method>
     <signal name="StatusChanged"><arg name="status_json" type="s"/></signal>
@@ -289,6 +305,16 @@ class AutoPowersaverService:
         self._sensors = HwmonReader()
         self._tuned = TunedAdmAdapter()
         self._controller = PolicyController(self._config, self._tuned, now=time.time)
+        self._conflict_scanner = ConflictScanner()
+        self._conflict_status = {
+            'status': 'scan_incomplete',
+            'scan_timestamp': None,
+            'scan_complete': False,
+            'potential_competing_controller_count': 0,
+            'potential_competing_controllers': [],
+        }
+        self._last_conflict_scan_epoch = 0.0
+        self._last_external_change_count = 0
         if HISTORY_PATH.exists():
             try:
                 with HISTORY_PATH.open(encoding='utf-8') as handle:
@@ -305,6 +331,8 @@ class AutoPowersaverService:
         self._last_logged_transition_id = self._last_transition_id
         self._node_info = Gio.DBusNodeInfo.new_for_xml(INTROSPECTION_XML)
         self._loop = GLib.MainLoop()
+        self._last_external_change_count = self._controller.external_change_count
+        self._scan_conflicts()
 
     def run(self) -> None:
         Gio.bus_own_name(
@@ -341,6 +369,8 @@ class AutoPowersaverService:
     def _poll(self) -> bool:
         self._timer_id = 0
         self._observe_host()
+        if time.time() - self._last_conflict_scan_epoch >= 3600:
+            self._scan_conflicts()
         self._persist_runtime_state()
         self._emit_status()
         self._schedule_next_poll()
@@ -354,12 +384,48 @@ class AutoPowersaverService:
         except Exception as error:
             self._controller.observe(
                 readings, None, tuned_available=False, tuned_error=str(error))
+        external_count = self._controller.external_change_count
+        if (
+            external_count > self._last_external_change_count and
+            external_count % 3 == 0
+        ):
+            self._scan_conflicts()
+        self._last_external_change_count = external_count
+
+    def _scan_conflicts(self) -> None:
+        try:
+            self._conflict_status = self._conflict_scanner.scan()
+            self._last_conflict_scan_epoch = time.time()
+            self._controller.active_competing_controllers = [
+                item['id'] for item in
+                self._conflict_status['potential_competing_controllers']
+                if item['active'] and item['confidence'] == 'high'
+            ]
+        except Exception as error:
+            self._conflict_status = {
+                **self._conflict_status,
+                'status': 'scan_incomplete',
+                'scan_complete': False,
+                'last_error': str(error),
+            }
+            print(f'Conflict scan failed without affecting thermal policy: {error}',
+                  file=sys.stderr)
 
     def _status_json(self) -> str:
-        return json.dumps(self._controller.status(), sort_keys=True, separators=(',', ':'))
+        return json.dumps(self._status(), sort_keys=True, separators=(',', ':'))
+
+    def _status(self) -> dict:
+        return {
+            **self._controller.status(),
+            'potential_competing_controller_count':
+                self._conflict_status['potential_competing_controller_count'],
+            'conflict_scan_status': self._conflict_status['status'],
+            'conflict_scan_timestamp': self._conflict_status['scan_timestamp'],
+            'conflict_scan_complete': self._conflict_status['scan_complete'],
+        }
 
     def _persist_runtime_state(self) -> None:
-        _atomic_json_write(STATE_PATH, self._controller.status(), 0o600)
+        _atomic_json_write(STATE_PATH, self._status(), 0o600)
         _atomic_json_write(HISTORY_PATH, self._controller.history(200), 0o600)
 
     def _emit_status(self, *, force: bool = False) -> None:
@@ -429,6 +495,14 @@ class AutoPowersaverService:
                 history = json.dumps(self._controller.history(limit), sort_keys=True)
                 invocation.return_value(GLib.Variant('(s)', (history,)))
                 return
+            if method_name in {'GetConflictStatus', 'RescanConflicts'}:
+                if method_name == 'RescanConflicts':
+                    self._scan_conflicts()
+                    self._persist_runtime_state()
+                    self._emit_status(force=True)
+                payload = json.dumps(self._conflict_status, sort_keys=True)
+                invocation.return_value(GLib.Variant('(s)', (payload,)))
+                return
 
             self._authorise(sender)
             # Refresh authoritative telemetry before evaluating any mutation,
@@ -473,6 +547,13 @@ class AutoPowersaverService:
                     'disable_behavior': behaviour,
                 })
                 self._controller.replace_config(updated)
+            elif method_name == 'SetHotProtectionWhenDisabled':
+                enabled, = parameters.unpack()
+                self._controller.set_hot_protection_when_disabled(enabled)
+            elif method_name == 'DisablePolicy':
+                restore_balanced, = parameters.unpack()
+                self._controller.disable(restore_balanced)
+                self._controller.set_hot_protection_when_disabled(False)
             else:
                 raise PolicyError(f'unknown method: {method_name}')
 

@@ -27,9 +27,18 @@ legacy_unit=framework-thermal-policy.service
 legacy_config=/etc/framework-thermal-policy.conf
 created_config=false
 
+if systemctl is-active --quiet "${legacy_unit}" || \
+    systemctl is-enabled --quiet "${legacy_unit}" 2>/dev/null; then
+    echo "Potential competing controller ${legacy_unit} is active or enabled." >&2
+    echo "Review it, then explicitly run: sudo systemctl disable --now ${legacy_unit}" >&2
+    echo 'Re-run this installer afterwards. FedoraUsage did not change the unit.' >&2
+    exit 1
+fi
+
 install -d -m 0755 /usr/lib/fedorausage /usr/libexec /usr/bin "${config_dir}"
 install -m 0644 "${source_dir}/auto_powersaver/__init__.py" /usr/lib/fedorausage/__init__.py
 install -m 0644 "${source_dir}/auto_powersaver/core.py" /usr/lib/fedorausage/core.py
+install -m 0644 "${source_dir}/auto_powersaver/conflicts.py" /usr/lib/fedorausage/conflicts.py
 install -m 0755 "${source_dir}/auto_powersaver/service.py" /usr/libexec/fedorausage-auto-powersaver
 install -m 0755 "${source_dir}/bin/fedorausage" /usr/bin/fedorausage
 install -m 0644 "${source_dir}/data/fedorausage-auto-powersaver.service" \
@@ -63,11 +72,6 @@ if [[ ${created_config} == true && -f ${legacy_config} ]]; then
         echo "Found ${legacy_config}, but did not migrate unrecognised or unsafe values."
     fi
     echo 'Control sensor identities use FedoraUsage fixed allowlists and were not copied from legacy configuration.'
-fi
-
-if systemctl list-unit-files "${legacy_unit}" --no-legend 2>/dev/null | grep -q "${legacy_unit}"; then
-    systemctl disable --now "${legacy_unit}" || true
-    echo "Disabled conflicting legacy controller ${legacy_unit}."
 fi
 
 systemctl daemon-reload

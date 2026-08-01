@@ -9,6 +9,7 @@ import unittest
 import xml.etree.ElementTree as ElementTree
 
 from auto_powersaver.core import Config, PolicyController, PolicyError, SensorReading
+from auto_powersaver.conflicts import ConflictScanner, HostConflictAdapter, MAX_FINDINGS
 
 
 class Clock:
@@ -193,12 +194,21 @@ class PolicyControllerTests(unittest.TestCase):
 
     def test_external_profile_change_becomes_manual_override(self) -> None:
         self.observe(60, 61)
+        self.controller.active_competing_controllers = [
+            'system:systemd_unit:custom-power-policy.service']
         self.tuned.profile = 'powersave'
         self.observe(60, 61)
         self.assertEqual(self.controller.policy_mode, 'manual_override')
         self.assertEqual(self.controller.manual_override_profile, 'powersave')
         self.assertEqual(
             self.controller.last_transition['reason'], 'external_profile_change')
+        status = self.controller.status()
+        self.assertTrue(status['external_profile_change_observed'])
+        self.assertEqual(status['external_change_count'], 1)
+        self.assertEqual(status['effective_profile_reason'], 'external_profile_change')
+        self.assertEqual(
+            self.controller.last_transition['correlated_active_controllers'],
+            ['system:systemd_unit:custom-power-policy.service'])
 
     def test_disable_leaves_profile_unchanged(self) -> None:
         self.observe(60, 61)
@@ -211,6 +221,46 @@ class PolicyControllerTests(unittest.TestCase):
         self.observe(83, 80)
         self.assertEqual(self.controller.policy_mode, 'disabled')
         self.assertEqual(self.tuned.profile, 'powersave')
+        status = self.controller.status()
+        self.assertFalse(status['automatic_management_enabled'])
+        self.assertEqual(status['enabled'], status['automatic_management_enabled'])
+        self.assertTrue(status['hot_protection_when_disabled'])
+        self.assertTrue(status['service_running'])
+        self.assertEqual(
+            status['effective_profile_reason'],
+            'hot_protection_while_disabled')
+
+    def test_disabled_mode_does_not_change_profile_when_protection_is_off(self) -> None:
+        controller = PolicyController(
+            replace(self.config, enabled=False, hot_protection_when_disabled=False),
+            self.tuned,
+            now=self.clock,
+        )
+        controller.observe(readings(83, 80), self.tuned.profile)
+        self.assertEqual(self.tuned.requests, [])
+        self.assertEqual(controller.active_profile, 'balanced')
+        self.assertEqual(controller.status()['effective_profile_reason'], 'profile_unchanged')
+
+    def test_hot_protection_can_be_changed_independently(self) -> None:
+        self.observe(60, 61)
+        self.controller.disable()
+        self.controller.set_hot_protection_when_disabled(False)
+        self.observe(83, 80)
+        self.assertEqual(self.tuned.requests, [])
+        self.assertFalse(self.controller.status()['hot_protection_when_disabled'])
+
+    def test_enabling_protection_while_disabled_and_hot_is_immediate(self) -> None:
+        controller = PolicyController(
+            replace(self.config, enabled=False, hot_protection_when_disabled=False),
+            self.tuned,
+            now=self.clock,
+        )
+        controller.observe(readings(83, 80), self.tuned.profile)
+        controller.set_hot_protection_when_disabled(True)
+        self.assertEqual(self.tuned.profile, 'powersave')
+        self.assertEqual(
+            controller.status()['effective_profile_reason'],
+            'hot_protection_while_disabled')
 
     def test_degraded_operation_can_be_disabled(self) -> None:
         controller = PolicyController(
@@ -294,6 +344,19 @@ class ConfigurationFileTests(unittest.TestCase):
         config = load_config(Path('data/auto-powersaver.conf'))
         self.assertEqual(config.hot_threshold_c, 82)
         self.assertEqual(config.recovery_threshold_c, 72)
+        self.assertTrue(config.hot_protection_when_disabled)
+
+    def test_missing_hot_protection_setting_migrates_to_safe_default(self) -> None:
+        try:
+            from auto_powersaver.service import load_config
+        except (ImportError, ValueError) as error:
+            self.skipTest(f'GIO bindings are unavailable: {error}')
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / 'auto-powersaver.conf'
+            path.write_text('[auto_powersaver]\nenabled = false\n', encoding='utf-8')
+            config = load_config(path)
+        self.assertFalse(config.enabled)
+        self.assertTrue(config.hot_protection_when_disabled)
 
     def test_configuration_round_trip_is_validated(self) -> None:
         try:
@@ -351,6 +414,29 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn('recovery', completed.stderr)
 
+    def test_cli_help_distinguishes_ordinary_and_complete_disable(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, 'bin/fedorausage', 'auto-powersaver', '--help'],
+            capture_output=True, text=True, check=False)
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn(
+            'hot protection remains active', ' '.join(completed.stdout.split()))
+        self.assertIn('disable-policy', completed.stdout)
+        self.assertIn('conflicts', completed.stdout)
+
+    def test_dbus_and_gnome_clients_expose_independent_dimensions(self) -> None:
+        service_source = Path('auto_powersaver/service.py').read_text(encoding='utf-8')
+        preferences_source = Path('prefs.js').read_text(encoding='utf-8')
+        extension_source = Path('extension.js').read_text(encoding='utf-8')
+        self.assertIn('SetHotProtectionWhenDisabled', service_source)
+        self.assertIn('GetConflictStatus', service_source)
+        self.assertIn('RescanConflicts', service_source)
+        for source in (preferences_source, extension_source):
+            self.assertIn('Automatically manage power profile', source)
+        self.assertIn('Hot protection while off', preferences_source)
+        self.assertIn('Thermal protection while off', extension_source)
+        self.assertIn('Hot protection selected Power Saver', extension_source)
+
     def test_privilege_policy_xml_is_well_formed(self) -> None:
         for path in [
             'data/net.crunchycodes.FedoraUsage.AutoPowersaver1.conf',
@@ -404,6 +490,151 @@ class ConfigurationFileTests(unittest.TestCase):
 
         self.assertFalse(sensor_readings['k10temp/Tctl'].valid)
         self.assertFalse(sensor_readings['cros_ec/cpu@4c'].valid)
+
+
+class FakeConflictAdapter:
+    def __init__(self, candidates, *, active=(), enabled=(), incomplete=False):
+        self._candidates = candidates
+        self._active = set(active)
+        self._enabled = set(enabled)
+        self.incomplete = incomplete
+
+    def candidates(self):
+        return [(Path(name), kind, scope) for name, kind, scope, _text in self._candidates]
+
+    def read_text(self, path):
+        for name, _kind, _scope, text in self._candidates:
+            if Path(name) == path:
+                return text
+        self.incomplete = True
+        return None
+
+    def systemd_state(self):
+        return self._active, self._enabled, not self.incomplete
+
+
+class ConflictScannerTests(unittest.TestCase):
+    def scan(self, candidates, *, active=(), enabled=(), incomplete=False):
+        adapter = FakeConflictAdapter(
+            candidates, active=active, enabled=enabled, incomplete=incomplete)
+        return ConflictScanner(adapter).scan()
+
+    def test_excludes_fedorausage_and_tuned_components(self) -> None:
+        result = self.scan([
+            ('fedorausage-auto-powersaver.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/bin/tuned-adm profile powersave'),
+            ('tuned.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/bin/tuned-adm profile balanced'),
+            ('tuned-ppd.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/bin/powerprofilesctl set balanced'),
+            ('manual-auto-powersaver-test.sh', 'script', 'system',
+             '/usr/bin/tuned-adm profile powersave'),
+        ])
+        self.assertEqual(result['potential_competing_controller_count'], 0)
+
+    def test_active_legacy_controller_is_high_confidence(self) -> None:
+        result = self.scan([
+            ('framework-thermal-policy.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/local/bin/framework-policy'),
+        ], active=('framework-thermal-policy.service',))
+        finding = result['potential_competing_controllers'][0]
+        self.assertEqual(finding['confidence'], 'high')
+        self.assertEqual(finding['risk'], 'active_competitor')
+        self.assertEqual(result['status'], 'high_risk')
+
+    def test_inactive_legacy_controller_is_historical(self) -> None:
+        result = self.scan([
+            ('framework-thermal-policy.service', 'systemd_unit', 'system', ''),
+        ])
+        finding = result['potential_competing_controllers'][0]
+        self.assertEqual(finding['confidence'], 'low')
+        self.assertEqual(finding['risk'], 'inactive_historical')
+
+    def test_active_profile_changing_system_and_user_units_are_detected(self) -> None:
+        result = self.scan([
+            ('custom-power-policy.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/bin/tuned-adm profile powersave'),
+            ('user-power.timer', 'systemd_unit', 'user',
+             'ExecStart=/usr/bin/powerprofilesctl set balanced'),
+        ], active=('custom-power-policy.service', 'user-power.timer'))
+        self.assertEqual(result['potential_competing_controller_count'], 2)
+        self.assertTrue(all(
+            item['confidence'] == 'high'
+            for item in result['potential_competing_controllers']))
+
+    def test_timer_and_referenced_script_are_correlated_read_only(self) -> None:
+        result = self.scan([
+            ('night-power.timer', 'systemd_unit', 'system',
+             '[Timer]\nOnCalendar=daily'),
+            ('night-power.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/local/bin/night-power'),
+            ('/usr/local/bin/night-power', 'script', 'system',
+             '#!/bin/sh\ntuned-adm profile powersave'),
+        ], active=('night-power.timer',), enabled=('night-power.timer',))
+        findings = {
+            item['name']: item for item in result['potential_competing_controllers']
+        }
+        self.assertEqual(findings['night-power.timer']['confidence'], 'high')
+        self.assertEqual(findings['night-power.timer']['risk'], 'active_competitor')
+        self.assertIn(
+            'references script', ' '.join(findings['night-power.service']['evidence']))
+
+    def test_cron_autostart_tlp_and_ppd_are_detected(self) -> None:
+        result = self.scan([
+            ('profile-cron', 'cron', 'system', 'tuned-adm profile powersave'),
+            ('power.desktop', 'autostart', 'user',
+             'Exec=powerprofilesctl set balanced'),
+            ('tlp.service', 'systemd_unit', 'system', 'ExecStart=/usr/sbin/tlp init'),
+            ('power-profiles-daemon.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/libexec/power-profiles-daemon'),
+        ], active=('tlp.service', 'power-profiles-daemon.service'))
+        self.assertEqual(result['potential_competing_controller_count'], 4)
+        known = {item['name']: item for item in result['potential_competing_controllers']}
+        self.assertEqual(known['tlp.service']['confidence'], 'high')
+        self.assertEqual(
+            known['power-profiles-daemon.service']['risk'], 'active_competitor')
+
+    def test_name_alone_does_not_make_unknown_unit_a_finding(self) -> None:
+        result = self.scan([
+            ('power-report.service', 'systemd_unit', 'system',
+             'ExecStart=/usr/bin/logger power report'),
+        ], active=('power-report.service',))
+        self.assertEqual(result['potential_competing_controller_count'], 0)
+
+    def test_duplicate_findings_merge_and_limits_are_enforced(self) -> None:
+        duplicate = ('controller.service', 'systemd_unit', 'system',
+                     'ExecStart=tuned-adm profile balanced')
+        result = self.scan([duplicate, duplicate])
+        self.assertEqual(result['potential_competing_controller_count'], 1)
+        many = [
+            (f'controller-{index}.service', 'systemd_unit', 'system',
+             'ExecStart=tuned-adm profile balanced')
+            for index in range(MAX_FINDINGS + 10)
+        ]
+        limited = self.scan(many)
+        self.assertEqual(limited['potential_competing_controller_count'], MAX_FINDINGS)
+        self.assertFalse(limited['scan_complete'])
+
+    def test_incomplete_scan_is_reported_without_failure(self) -> None:
+        result = self.scan([], incomplete=True)
+        self.assertFalse(result['scan_complete'])
+        self.assertEqual(result['status'], 'scan_incomplete')
+
+    def test_host_adapter_does_not_follow_candidates_outside_allowlisted_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            allowed = root / 'units'
+            allowed.mkdir()
+            outside = root / 'unrelated.service'
+            outside.write_text(
+                'ExecStart=/usr/bin/tuned-adm profile powersave', encoding='utf-8')
+            (allowed / 'linked.service').symlink_to(outside)
+            adapter = HostConflictAdapter(
+                systemd_locations=(allowed,), script_locations=(),
+                cron_locations=(), autostart_locations=(),
+                user_homes_root=root / 'no-homes')
+            candidates = adapter.candidates()
+        self.assertEqual(candidates, [])
 
 
 if __name__ == '__main__':

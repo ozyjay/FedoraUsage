@@ -21,6 +21,7 @@ mkdir -p -m 0700 -- "${audit_dir}"
 audit_path=${audit_dir}/auto-powersaver-audit-$(date +%Y%m%dT%H%M%S).jsonl
 initial_status=$(fedorausage auto-powersaver status)
 initial_enabled=$(jq -r '.enabled' <<<"${initial_status}")
+initial_protection=$(jq -r '.hot_protection_when_disabled' <<<"${initial_status}")
 initial_mode=$(jq -r '.policy_mode' <<<"${initial_status}")
 initial_profile=$(jq -r '.active_profile' <<<"${initial_status}")
 initial_hot=$(jq -r '.hot_threshold_c' <<<"${initial_status}")
@@ -53,6 +54,7 @@ record_note() {
 restore_host() {
     set +e
     fedorausage auto-powersaver set-thresholds "${initial_hot}" "${initial_recovery}" >/dev/null
+    fedorausage auto-powersaver protection enable >/dev/null
     if [[ ${initial_enabled} == true ]]; then
         fedorausage auto-powersaver enable >/dev/null
         fedorausage auto-powersaver force "${initial_profile}" >/dev/null
@@ -63,6 +65,9 @@ restore_host() {
         fedorausage auto-powersaver enable >/dev/null
         fedorausage auto-powersaver force "${initial_profile}" >/dev/null
         fedorausage auto-powersaver disable >/dev/null
+    fi
+    if [[ ${initial_protection} == false ]]; then
+        fedorausage auto-powersaver protection disable >/dev/null
     fi
     record_status restoration_complete
     set -e
@@ -100,17 +105,23 @@ if (( recovery_threshold < 30 )); then
     exit 1
 fi
 
-fedorausage auto-powersaver enable >/dev/null
-fedorausage auto-powersaver pause 15m >/dev/null
+fedorausage auto-powersaver protection enable >/dev/null
+fedorausage auto-powersaver disable >/dev/null
 fedorausage auto-powersaver set-thresholds "${hot_threshold}" "${recovery_threshold}" >/dev/null
 sleep 8
-record_status hot_safety_while_paused
+record_status hot_protection_while_automatic_management_off
 if [[ $(fedorausage auto-powersaver status | jq -r '.active_profile') != powersave ]]; then
     record_note immediate_powersave failed
     exit 1
 fi
+if [[ $(fedorausage auto-powersaver status | jq -r '.effective_profile_reason') != hot_protection_when_disabled ]]; then
+    record_note hot_protection_reason failed
+    exit 1
+fi
+record_note hot_protection_reason passed
+record_note hot_protection_notification 'manual confirmation required: notification identifies hot protection and the control temperature'
 record_note immediate_powersave passed
-if fedorausage auto-powersaver force balanced >/dev/null 2>&1; then
+if fedorausage auto-powersaver disable --balanced >/dev/null 2>&1; then
     record_note force_balanced_while_hot failed
     exit 1
 else
@@ -119,10 +130,21 @@ fi
 record_note gnome_live_update 'manual confirmation required: extension and GNOME Settings show Power Saver without reopening'
 
 fedorausage auto-powersaver set-thresholds "${initial_hot}" "${initial_recovery}" >/dev/null
-fedorausage auto-powersaver resume >/dev/null
+fedorausage auto-powersaver enable >/dev/null
 record_note recovery 'observe dwell and consecutive readings before continuing'
 sleep 45
 record_status validated_recovery
+
+if [[ $(fedorausage auto-powersaver status | jq -r '.thermal_state') != hot ]]; then
+    fedorausage auto-powersaver disable >/dev/null
+    fedorausage auto-powersaver protection disable >/dev/null
+    record_status both_policy_behaviours_disabled_while_cool
+    record_note no_transition_with_protection_disabled 'passed: no artificial heat was created on the production host'
+    fedorausage auto-powersaver protection enable >/dev/null
+    fedorausage auto-powersaver enable >/dev/null
+else
+    record_note protection_disable_while_cool 'skipped: host remained thermally hot'
+fi
 
 fedorausage auto-powersaver pause 1m >/dev/null
 record_status pause_started
@@ -147,6 +169,20 @@ fi
 /usr/bin/tuned-adm profile "${external_profile}"
 sleep 8
 record_status external_profile_change
+
+conflict_status=$(fedorausage auto-powersaver conflicts)
+jq -c --arg step conflict_scan \
+    '{timestamp:(now | todateiso8601), step:$step, conflicts:.}' \
+    <<<"${conflict_status}" |
+    tee -a "${audit_path}"
+if jq -e '.potential_competing_controllers | all(.name != "fedorausage-auto-powersaver.service")' \
+    <<<"${conflict_status}" >/dev/null; then
+    record_note own_service_excluded passed
+else
+    record_note own_service_excluded failed
+    exit 1
+fi
+record_note fake_competitor_test 'use a fake integration environment; no controller was created on this host'
 
 record_note sensor_loss_tctl 'requires fake-hwmon integration environment; production driver unbinding is intentionally unsupported'
 record_note sensor_loss_ec 'requires fake-hwmon integration environment; production driver unbinding is intentionally unsupported'

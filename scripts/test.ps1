@@ -39,6 +39,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $PythonFiles = @(
     (Join-Path $SourceDir 'auto_powersaver/core.py'),
+    (Join-Path $SourceDir 'auto_powersaver/conflicts.py'),
     (Join-Path $SourceDir 'auto_powersaver/service.py'),
     (Join-Path $SourceDir 'bin/fedorausage')
 )

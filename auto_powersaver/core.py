@@ -123,6 +123,9 @@ class PolicyController:
         self.control_temperature_c: float | None = None
         self.sensor_readings: dict[str, SensorReading] = {}
         self.effective_profile_reason = 'starting'
+        self.external_change_count = 0
+        self.last_external_profile_change: dict | None = None
+        self.active_competing_controllers: list[str] = []
         self.paused_until: float | None = None
         self.paused_previous_mode: str | None = None
         self.manual_override_profile: str | None = None
@@ -167,6 +170,7 @@ class PolicyController:
         if not tuned_available or active_profile is None:
             self.service_health = 'tuned_unavailable'
             self.last_error = tuned_error or 'TuneD is unavailable'
+            self.effective_profile_reason = 'tuned_unavailable'
         else:
             self.service_health = 'healthy'
             if self.last_error == 'TuneD is unavailable' or self.last_error == tuned_error:
@@ -197,6 +201,8 @@ class PolicyController:
         if self.telemetry_quality == 'unknown' and tuned_available:
             self.service_health = 'fault'
             self.last_error = telemetry_error
+            if not self.hot_latched:
+                self.effective_profile_reason = 'telemetry_unknown'
         elif self.last_error == telemetry_error:
             self.service_health = 'healthy'
             self.last_error = None
@@ -229,22 +235,26 @@ class PolicyController:
                 )
                 return
 
+        before_mode = self.policy_mode
         if self.config.enabled:
-            before_mode = self.policy_mode
             self.policy_mode = 'manual_override'
             self.manual_override_profile = observed_profile
             self.manual_override_until = now + self.config.manual_override_seconds
             self.paused_until = None
             self.paused_previous_mode = None
-            self._record_event(
-                reason='external_profile_change',
-                source='external',
-                success=True,
-                previous_profile=previous_profile,
-                requested_profile=observed_profile,
-                resulting_profile=observed_profile,
-                policy_mode_before=before_mode,
-            )
+        self.external_change_count += 1
+        self.effective_profile_reason = 'external_profile_change'
+        self._record_event(
+            reason='external_profile_change',
+            source='external',
+            success=True,
+            previous_profile=previous_profile,
+            requested_profile=observed_profile,
+            resulting_profile=observed_profile,
+            policy_mode_before=before_mode,
+            correlated_controllers=self.active_competing_controllers,
+        )
+        self.last_external_profile_change = self.last_transition
 
     def _expire_temporary_mode(self, now: float) -> None:
         if self.policy_mode == 'paused' and self.paused_until is not None and now >= self.paused_until:
@@ -277,8 +287,13 @@ class PolicyController:
             self.hot_latched = True
             self._reset_recovery()
             if safety_enabled and self.tuned_available:
+                reason = (
+                    'automatic_hot' if self.config.enabled
+                    else 'hot_protection_while_disabled')
                 self._request_profile(
-                    self.config.hot_profile, 'hot_threshold_exceeded', 'safety')
+                    self.config.hot_profile, reason, 'safety')
+            elif not safety_enabled:
+                self.effective_profile_reason = 'profile_unchanged'
             return
 
         if self.hot_latched:
@@ -306,21 +321,29 @@ class PolicyController:
             self._reset_recovery()
             self.thermal_state = (
                 'telemetry_degraded' if self.telemetry_quality == 'degraded' else 'normal')
-            self._apply_mode_profile(reason='validated_recovery', source='recovery')
+            if self.policy_mode == 'disabled':
+                self.effective_profile_reason = 'recovery'
+            self._apply_mode_profile(reason='recovery', source='recovery')
             return
 
         self.thermal_state = (
             'telemetry_degraded' if self.telemetry_quality == 'degraded' else 'normal')
         self._reset_recovery()
-        self._apply_mode_profile(reason='policy_evaluation', source='automatic')
+        self._apply_mode_profile(reason='automatic_normal', source='automatic')
 
     def _apply_mode_profile(self, *, reason: str, source: str) -> None:
         if not self.tuned_available:
             return
         if self.policy_mode == 'automatic':
             self._request_profile(self.config.normal_profile, reason, source)
-        elif self.policy_mode == 'manual_override' and self.manual_override_profile in ALLOWED_PROFILES:
-            self._request_profile(self.manual_override_profile, reason, source)
+        elif (
+            self.policy_mode == 'manual_override' and
+            self.manual_override_profile in ALLOWED_PROFILES and
+            self.active_profile != self.manual_override_profile
+        ):
+            self._request_profile(self.manual_override_profile, 'manual_override', source)
+        elif self.policy_mode == 'disabled' and self.effective_profile_reason == 'starting':
+            self.effective_profile_reason = 'profile_unchanged'
 
     def _reset_recovery(self) -> None:
         self._recovery_started_at = None
@@ -399,9 +422,9 @@ class PolicyController:
                            policy_mode_before=before_mode)
         if self.hot_latched:
             self._request_profile(
-                self.config.hot_profile, 'enabled_while_hot', 'safety')
+                self.config.hot_profile, 'automatic_hot', 'safety')
         else:
-            self._apply_mode_profile(reason='enabled', source='user')
+            self._apply_mode_profile(reason='automatic_normal', source='user')
 
     def disable(self, restore_balanced: bool = False) -> None:
         if restore_balanced and (self.hot_latched or self.control_temperature_c is None):
@@ -423,7 +446,31 @@ class PolicyController:
                            policy_mode_before=before_mode)
         if restore_balanced:
             self._request_profile(
-                self.config.normal_profile, 'disabled_and_balanced', 'user')
+                self.config.normal_profile, 'forced_balanced', 'user')
+
+    def set_hot_protection_when_disabled(self, enabled: bool) -> None:
+        if not isinstance(enabled, bool):
+            raise PolicyError('hot protection setting must be boolean')
+        self.config = Config(**{
+            **asdict(self.config),
+            'hot_protection_when_disabled': enabled,
+        })
+        self._record_event(
+            reason=(
+                'hot_protection_enabled' if enabled
+                else 'hot_protection_disabled'),
+            source='user',
+            success=True,
+        )
+        if (
+            enabled and not self.config.enabled and self.hot_latched and
+            self.tuned_available
+        ):
+            self._request_profile(
+                self.config.hot_profile,
+                'hot_protection_while_disabled',
+                'safety',
+            )
 
     def pause(self, duration_seconds: int) -> None:
         if not self.config.enabled:
@@ -504,9 +551,10 @@ class PolicyController:
         self.manual_override_until = self._now() + self.config.manual_override_seconds
         self.paused_until = None
         self.paused_previous_mode = None
-        self._record_event(reason=f'manual_{profile}', source='user', success=True,
+        reason = 'forced_power_saver' if profile == 'powersave' else 'forced_balanced'
+        self._record_event(reason=reason, source='user', success=True,
                            policy_mode_before=before_mode)
-        self._request_profile(profile, f'manual_{profile}', 'user')
+        self._request_profile(profile, reason, 'user')
 
     def set_thresholds(self, hot_c: float, recovery_c: float) -> None:
         updated = Config(**{
@@ -530,6 +578,7 @@ class PolicyController:
         resulting_profile: str | None = None,
         verification_result: str | None = None,
         policy_mode_before: str | None = None,
+        correlated_controllers: list[str] | None = None,
     ) -> None:
         event = {
             'transition_id': transition_id or str(uuid.uuid4()),
@@ -555,6 +604,7 @@ class PolicyController:
             'trigger_source': source,
             'success': success,
             'verification_result': verification_result or ('verified' if success else 'failed'),
+            'correlated_active_controllers': list(correlated_controllers or []),
         }
         self._history.append(event)
         self.last_transition = event
@@ -573,6 +623,12 @@ class PolicyController:
                 self._history.append(event)
         if self._history:
             self.last_transition = self._history[-1]
+            external = [
+                event for event in self._history
+                if event.get('reason') == 'external_profile_change'
+            ]
+            self.external_change_count = len(external)
+            self.last_external_profile_change = external[-1] if external else None
 
     def status(self) -> dict:
         now = self._now()
@@ -581,6 +637,9 @@ class PolicyController:
             if self._last_observed_at is not None else 0.0)
         return {
             'enabled': self.config.enabled,
+            'automatic_management_enabled': self.config.enabled,
+            'hot_protection_when_disabled': self.config.hot_protection_when_disabled,
+            'service_running': True,
             'policy_mode': self.policy_mode,
             'thermal_state': self.thermal_state,
             'telemetry_quality': self.telemetry_quality,
@@ -597,6 +656,9 @@ class PolicyController:
             },
             'active_profile': self.active_profile,
             'effective_profile_reason': self.effective_profile_reason,
+            'external_profile_change_observed': self.external_change_count > 0,
+            'external_change_count': self.external_change_count,
+            'last_external_profile_change': self.last_external_profile_change,
             'hot_threshold_c': self.config.hot_threshold_c,
             'recovery_threshold_c': self.config.recovery_threshold_c,
             'poll_interval_seconds': self.config.poll_interval_seconds,
