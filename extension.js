@@ -859,26 +859,15 @@ class SystemUsageIndicator extends PanelMenu.Button {
             reactive: false,
             can_focus: false,
         });
-        this._swapItem = new PopupMenu.PopupMenuItem('Swap: --', {
-            reactive: false,
-            can_focus: false,
-        });
         this._temperatureItem = new PopupMenu.PopupMenuItem('Hottest: --', {
             reactive: false,
             can_focus: false,
         });
-        this._temperatureSensorsSubMenu =
-            new PopupMenu.PopupSubMenuMenuItem('Other temperature sensors');
-        this._temperatureSensorItems = [];
-        this._temperatureSensorSeparator = new PopupMenu.PopupSeparatorMenuItem();
         this._fanItem = new PopupMenu.PopupMenuItem('Fan 1: --', {
             reactive: false,
             can_focus: false,
         });
         this._fanItem.visible = false;
-        this._otherFansSubMenu = new PopupMenu.PopupSubMenuMenuItem('Other fans');
-        this._otherFansSubMenu.visible = false;
-        this._otherFanItems = [];
         this._storageItems = STORAGE_FILESYSTEMS.map(storage =>
             new PopupMenu.PopupMenuItem(`${storage.name}: --`, {
                 reactive: false,
@@ -886,12 +875,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
             }));
 
         this.menu.addMenuItem(this._ramItem);
-        this.menu.addMenuItem(this._swapItem);
         this.menu.addMenuItem(this._temperatureItem);
-        this.menu.addMenuItem(this._temperatureSensorsSubMenu);
-        this.menu.addMenuItem(this._temperatureSensorSeparator);
         this.menu.addMenuItem(this._fanItem);
-        this.menu.addMenuItem(this._otherFansSubMenu);
         for (const item of this._storageItems)
             this.menu.addMenuItem(item);
 
@@ -946,18 +931,14 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverSettingsItem =
             new PopupMenu.PopupMenuItem('Auto-Powersaver settings…');
 
+        this._autoPowersaverDetailsSubMenu =
+            new PopupMenu.PopupSubMenuMenuItem('Auto-Powersaver details');
         for (const item of [
-            this._autoPowersaverSeparator,
-            this._autoPowersaverSwitch,
             this._autoPowersaverProtectionItem,
             this._autoPowersaverProtectionExplanationItem,
             this._autoPowersaverServiceItem,
-            this._autoPowersaverModeItem,
-            this._autoPowersaverThermalItem,
             this._autoPowersaverTelemetryItem,
             this._autoPowersaverHealthItem,
-            this._autoPowersaverControlTemperatureItem,
-            this._autoPowersaverProfileItem,
             this._autoPowersaverTctlItem,
             this._autoPowersaverEcItem,
             this._autoPowersaverGpuItem,
@@ -965,17 +946,35 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._autoPowersaverReasonItem,
             this._autoPowersaverExternalItem,
             this._autoPowersaverConflictsItem,
-            new PopupMenu.PopupSeparatorMenuItem(),
+            this._autoPowersaverInfoItem,
+        ])
+            this._autoPowersaverDetailsSubMenu.menu.addMenuItem(item);
+
+        this._autoPowersaverActionsSubMenu =
+            new PopupMenu.PopupSubMenuMenuItem('Power profile controls');
+        for (const item of [
             this._autoPowersaverPause15Item,
             this._autoPowersaverPause60Item,
             this._autoPowersaverResumeItem,
+            new PopupMenu.PopupSeparatorMenuItem(),
             this._autoPowersaverForceSaverItem,
             this._autoPowersaverForceBalancedItem,
             this._autoPowersaverAutomaticItem,
             this._autoPowersaverDisableBalancedItem,
+        ])
+            this._autoPowersaverActionsSubMenu.menu.addMenuItem(item);
+
+        for (const item of [
+            this._autoPowersaverSeparator,
+            this._autoPowersaverSwitch,
+            this._autoPowersaverModeItem,
+            this._autoPowersaverThermalItem,
+            this._autoPowersaverControlTemperatureItem,
+            this._autoPowersaverProfileItem,
+            this._autoPowersaverDetailsSubMenu,
+            this._autoPowersaverActionsSubMenu,
             this._autoPowersaverHistorySubMenu,
             this._autoPowersaverSettingsItem,
-            this._autoPowersaverInfoItem,
         ])
             this.menu.addMenuItem(item);
 
@@ -1497,8 +1496,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._temperatureIconLabel.text = PANEL_TEMPERATURE_NORMAL_LABEL;
             this._temperatureLabel.text = '--°C';
             this._temperatureItem.label.text = 'Hottest: unavailable';
-            this._setTemperatureSensorItems([]);
-            this._setFanItems({fanOne: null, otherFans: []});
+            this._setFanItems({fanOne: null});
             for (const labels of this._storagePanelLabels)
                 labels.percentLabel.text = '--%';
             this._setLevelClass('unknown');
@@ -1535,13 +1533,6 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._memoryPercentLabel.text = `${stats.usedPercent}%`;
         this._ramItem.label.text = `RAM: ${_formatKib(stats.used)} / ${_formatKib(stats.total)} (${stats.usedPercent}%)`;
 
-        if (stats.swapTotal > 0) {
-            this._swapItem.label.text =
-                `Swap: ${_formatKib(stats.swapUsed)} / ${_formatKib(stats.swapTotal)} (${stats.swapPercent}%)`;
-        } else {
-            this._swapItem.label.text = 'Swap: not configured';
-        }
-
         if (temperatureStats.available) {
             this._temperatureIconLabel.text =
                 temperatureStats.hottest.temperature >= TEMPERATURE_WARNING_THRESHOLD_C
@@ -1557,7 +1548,6 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._temperatureItem.label.text = 'Hottest: unavailable';
         }
 
-        this._setTemperatureSensorItems(temperatureStats.sensors, temperatureStats.hottest);
         this._setFanItems(fanStats);
 
         storageStats.forEach((storage, index) => {
@@ -1593,40 +1583,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._setLevelClass('normal');
     }
 
-    _setTemperatureSensorItems(sensors, hottestSensor = null) {
-        for (const item of this._temperatureSensorItems)
-            item.destroy();
-
-        const otherSensors = hottestSensor === null
-            ? sensors
-            : sensors.filter(sensor => sensor !== hottestSensor);
-        const sensorCount = otherSensors.length;
-
-        this._temperatureSensorsSubMenu.label.text =
-            `Other temperature sensors (${sensorCount})`;
-
-        if (sensorCount === 0) {
-            this._temperatureSensorItems = [
-                new PopupMenu.PopupMenuItem('No other sensors found', {
-                    reactive: false,
-                    can_focus: false,
-                }),
-            ];
-        } else {
-            this._temperatureSensorItems = otherSensors.map(sensor =>
-                new PopupMenu.PopupMenuItem(
-                    `${sensor.displayName}: ${_formatTemperature(sensor.temperature)}`,
-                    {
-                        reactive: false,
-                        can_focus: false,
-                    }));
-        }
-
-        this._temperatureSensorItems.forEach(item =>
-            this._temperatureSensorsSubMenu.menu.addMenuItem(item));
-    }
-
-    _setFanItems({fanOne, otherFans}) {
+    _setFanItems({fanOne}) {
         const showFanOne = fanOne !== null;
 
         this._fanItem.visible = showFanOne;
@@ -1638,22 +1595,6 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         if (showFanOne)
             this._fanItem.label.text = `${fanOne.name}: ${_formatFanSpeed(fanOne.speed)}`;
-
-        for (const item of this._otherFanItems)
-            item.destroy();
-
-        this._otherFanItems = otherFans.map(fan =>
-            new PopupMenu.PopupMenuItem(
-                `${fan.name}: ${_formatFanSpeed(fan.speed)}`,
-                {
-                    reactive: false,
-                    can_focus: false,
-                }));
-
-        this._otherFansSubMenu.visible = this._otherFanItems.length > 0;
-        this._otherFansSubMenu.label.text = `Other fans (${this._otherFanItems.length})`;
-        this._otherFanItems.forEach(item =>
-            this._otherFansSubMenu.menu.addMenuItem(item));
     }
 
     _setLevelClass(level) {
