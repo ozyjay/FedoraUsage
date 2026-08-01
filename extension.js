@@ -1073,27 +1073,39 @@ class SystemUsageIndicator extends PanelMenu.Button {
         const showAutoPowersaver =
             this._settings.get_boolean(SHOW_AUTO_POWERSAVER_KEY);
 
-        this._memoryIconLabel.visible = showMemory;
-        this._memoryPercentLabel.visible = showMemory;
-        this._temperatureIconLabel.visible = showTemperature;
-        this._temperatureLabel.visible = showTemperature;
-        this._autoPowersaverIconLabel.visible = showAutoPowersaver;
-        this._autoPowersaverTemperatureLabel.visible = showAutoPowersaver;
+        this._setPanelLabelsVisible(
+            [this._memoryIconLabel, this._memoryPercentLabel], showMemory);
+        this._setPanelLabelsVisible(
+            [this._temperatureIconLabel, this._temperatureLabel], showTemperature);
+        this._setPanelLabelsVisible([
+            this._autoPowersaverIconLabel,
+            this._autoPowersaverTemperatureLabel,
+        ], showAutoPowersaver);
         this._autoPowersaverGpuItem.visible =
             this._settings.get_boolean(SHOW_AUTO_POWERSAVER_GPU_KEY);
 
         const showFan = this._settings.get_boolean(SHOW_FAN_KEY) &&
             this._fanSpeedLabel.text !== '';
-        this._fanIconLabel.visible = showFan;
-        this._fanSpeedLabel.visible = showFan;
+        this._setPanelLabelsVisible(
+            [this._fanIconLabel, this._fanSpeedLabel], showFan);
 
         this._storagePanelLabels.forEach((labels, index) => {
             const visible = this._settings.get_boolean(
                 STORAGE_FILESYSTEMS[index].panelSettingKey);
 
-            labels.iconLabel.visible = visible;
-            labels.percentLabel.visible = visible;
+            this._setPanelLabelsVisible(
+                [labels.iconLabel, labels.percentLabel], visible);
         });
+    }
+
+    _setPanelLabelsVisible(labels, visible) {
+        if (visible && labels.some(label => !label.visible)) {
+            for (let index = labels.length - 1; index >= 0; index--)
+                this._panelBox.set_child_at_index(labels[index], 0);
+        }
+
+        for (const label of labels)
+            label.visible = visible;
     }
 
     _createStatusItem(label) {
@@ -1617,14 +1629,12 @@ class SystemUsageIndicator extends PanelMenu.Button {
     _setFanItems({fanOne, otherFans}) {
         const showFanOne = fanOne !== null;
 
-        this._fanIconLabel.visible = showFanOne;
-        this._fanSpeedLabel.visible = showFanOne;
         this._fanItem.visible = showFanOne;
         this._fanSpeedLabel.text = showFanOne ? _formatFanSpeed(fanOne.speed) : '';
         const showFanInPanel = showFanOne && this._settings.get_boolean(SHOW_FAN_KEY);
 
-        this._fanIconLabel.visible = showFanInPanel;
-        this._fanSpeedLabel.visible = showFanInPanel;
+        this._setPanelLabelsVisible(
+            [this._fanIconLabel, this._fanSpeedLabel], showFanInPanel);
 
         if (showFanOne)
             this._fanItem.label.text = `${fanOne.name}: ${_formatFanSpeed(fanOne.speed)}`;

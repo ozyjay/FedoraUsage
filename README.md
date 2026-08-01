@@ -139,8 +139,9 @@ gnome-extensions prefs system-usage@crunchycodes.net
 
 The same preferences window controls which readings appear in the top bar.
 Disabling a top-bar reading does not remove its details from the dropdown or
-sensor history. Set **Secondary SSD location** to the absolute path at which
-that filesystem is mounted.
+sensor history. Readings that become visible are added at the leading edge so
+the existing top-bar information stays in place. Set **Secondary SSD location**
+to the absolute path at which that filesystem is mounted.
 
 Read today's latest records with:
 
