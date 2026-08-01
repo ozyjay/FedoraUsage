@@ -12,6 +12,10 @@
   spacing: 0.1em;
 }
 
+.system-usage-temperature-field {
+  spacing: 0;
+}
+
 .system-usage-field-icon {
   width: 1.5em;
   text-align: right;
@@ -30,7 +34,7 @@
 
 .system-usage-temperature-value {
   width: 4em;
-  text-align: center;
+  text-align: left;
 }
 
 .system-usage-fan-speed {
@@ -41,7 +45,7 @@
 /* Accommodates a sensor-type icon and temperatures from -50°C to 150°C. */
 .system-usage-label.system-usage-hottest-temperature {
   width: 6em;
-  text-align: center;
+  text-align: left;
 }
 
 .system-usage-normal .system-usage-label {

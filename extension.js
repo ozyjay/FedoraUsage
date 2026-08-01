@@ -814,6 +814,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
         });
         this._temperatureBox = this._createPanelField(
             this._temperatureIconLabel, this._temperatureLabel);
+        this._temperatureBox.add_style_class_name(
+            'system-usage-temperature-field');
         this._autoPowersaverIconLabel = new St.Label({
             style_class: 'system-usage-label system-usage-field-icon',
             text: '!',
@@ -826,6 +828,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
         });
         this._autoPowersaverBox = this._createPanelField(
             this._autoPowersaverIconLabel, this._autoPowersaverTemperatureLabel);
+        this._autoPowersaverBox.add_style_class_name(
+            'system-usage-temperature-field');
         this._fanIconLabel = new St.Label({
             style_class: 'system-usage-label system-usage-field-icon',
             text: PANEL_FAN_LABEL,

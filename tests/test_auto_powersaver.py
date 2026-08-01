@@ -497,6 +497,9 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertNotIn('set_child_at_index', extension_source)
         self.assertIn('system-usage-hottest-temperature', stylesheet_source)
         self.assertIn("style_class: 'system-usage-field'", extension_source)
+        self.assertEqual(
+            extension_source.count("'system-usage-temperature-field'"), 2)
+        self.assertIn('.system-usage-temperature-field', stylesheet_source)
         self.assertIn('.system-usage-field-icon', stylesheet_source)
         self.assertIn('.system-usage-percent', stylesheet_source)
         self.assertIn('.system-usage-temperature-value', stylesheet_source)
