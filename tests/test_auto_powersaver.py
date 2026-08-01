@@ -663,6 +663,31 @@ class ConflictScannerTests(unittest.TestCase):
         self.assertEqual(active, {('system', 'active.service')})
         self.assertEqual(enabled, {('system', 'active.service')})
 
+    def test_host_adapter_skips_uninstantiated_templates_in_details(self) -> None:
+        commands = []
+
+        def run(command, **_kwargs):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        adapter = HostConflictAdapter()
+        with patch.dict('os.environ', {'XDG_RUNTIME_DIR': ''}), patch(
+            'auto_powersaver.conflicts.subprocess.run', side_effect=run,
+        ):
+            _details, complete = adapter.systemd_details([
+                ('alsa-card-wait@.service', 'system'),
+                ('maintenance@.timer', 'system'),
+                ('maintenance@daily.timer', 'system'),
+                ('regular.service', 'system'),
+            ])
+
+        self.assertTrue(complete)
+        self.assertEqual(len(commands), 1)
+        self.assertNotIn('alsa-card-wait@.service', commands[0])
+        self.assertNotIn('maintenance@.timer', commands[0])
+        self.assertIn('maintenance@daily.timer', commands[0])
+        self.assertIn('regular.service', commands[0])
+
     def test_host_adapter_skips_large_binary_without_incomplete_scan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             binary = Path(temporary_directory) / 'controller'

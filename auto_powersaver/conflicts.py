@@ -189,7 +189,10 @@ class HostConflictAdapter:
         for scope in ('system', 'user'):
             names = sorted({
                 name for name, unit_scope in units
-                if unit_scope == scope and UNIT_NAME.fullmatch(name)
+                if (
+                    unit_scope == scope and UNIT_NAME.fullmatch(name) and
+                    not name.endswith(('@.service', '@.timer'))
+                )
             })[:MAX_SYSTEMD_FILES_PER_LOCATION]
             if not names or (scope == 'user' and not os.environ.get('XDG_RUNTIME_DIR')):
                 continue
