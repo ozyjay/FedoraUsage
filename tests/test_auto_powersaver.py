@@ -472,20 +472,27 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertNotIn('Thermal protection while off', extension_source)
         self.assertIn('Hot protection selected Power Saver', extension_source)
 
-    def test_panel_readings_have_a_stable_order_and_temperature_width(self) -> None:
+    def test_panel_readings_have_stable_order_and_compact_fields(self) -> None:
         extension_source = Path('extension.js').read_text(encoding='utf-8')
         stylesheet_source = Path('stylesheet.css').read_text(encoding='utf-8')
         ordered_additions = [
-            'this._panelBox.add_child(this._fanIconLabel);',
-            'this._panelBox.add_child(this._memoryIconLabel);',
-            'this._panelBox.add_child(labels.iconLabel);',
-            'this._panelBox.add_child(this._autoPowersaverIconLabel);',
-            'this._panelBox.add_child(this._temperatureIconLabel);',
+            'this._panelBox.add_child(this._fanBox);',
+            'this._panelBox.add_child(this._memoryBox);',
+            'this._panelBox.add_child(labels.box);',
+            'this._panelBox.add_child(this._autoPowersaverBox);',
+            'this._panelBox.add_child(this._temperatureBox);',
         ]
         positions = [extension_source.index(line) for line in ordered_additions]
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn('set_child_at_index', extension_source)
         self.assertIn('system-usage-hottest-temperature', stylesheet_source)
+        self.assertIn("style_class: 'system-usage-field'", extension_source)
+        self.assertIn('.system-usage-field-icon', stylesheet_source)
+        self.assertIn('.system-usage-percent', stylesheet_source)
+        self.assertIn('.system-usage-temperature-value', stylesheet_source)
+        self.assertIn('.system-usage-fan-speed', stylesheet_source)
+        self.assertIn("return `${sensor.friendlyIcon} ", extension_source)
+        self.assertIn('spacing: 0', stylesheet_source)
         self.assertIn('text-align: left', stylesheet_source)
 
     def test_privilege_policy_xml_is_well_formed(self) -> None:

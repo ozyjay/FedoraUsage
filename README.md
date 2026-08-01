@@ -23,7 +23,8 @@ Framework Computer Inc.
 
 - Updates every two seconds.
 - Shows configurable memory, hottest-sensor, active Fan 1, system filesystem
-  and secondary SSD readings in the top bar.
+  and secondary SSD readings in compact, fixed-width panel fields. The hottest
+  reading uses a sensor-type icon and retains the full sensor name in the menu.
 - Switches from `🌡` to `🔥` when the hottest sensor reaches 75°C.
 - Uses `/proc/meminfo` and `MemAvailable` for RAM usage.
 - Reads Linux `hwmon` temperature and fan sensors, falling back to

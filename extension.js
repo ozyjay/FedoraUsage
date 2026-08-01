@@ -452,17 +452,8 @@ function _applyFriendlySensorNames(sensors) {
     return sensors;
 }
 
-function _formatPanelSensorName(name) {
-    const maxLength = 14;
-
-    if (name.length <= maxLength)
-        return name;
-
-    return `${name.slice(0, maxLength - 1)}…`;
-}
-
 function _formatPanelTemperature(sensor) {
-    return `${_formatPanelSensorName(sensor.panelName)} ${_formatTemperature(sensor.temperature)}`;
+    return `${sensor.friendlyIcon} ${_formatTemperature(sensor.temperature)}`;
 }
 
 function _readHwmonTemperatureSensors() {
@@ -799,17 +790,19 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this.add_child(this._panelBox);
 
         this._memoryIconLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-icon',
+            style_class: 'system-usage-label system-usage-field-icon',
             text: PANEL_MEMORY_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._memoryPercentLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-number mini-font',
+            style_class: 'system-usage-label system-usage-number mini-font system-usage-percent',
             text: '--%',
             y_align: Clutter.ActorAlign.CENTER,
         });
+        this._memoryBox = this._createPanelField(
+            this._memoryIconLabel, this._memoryPercentLabel);
         this._temperatureIconLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-icon',
+            style_class: 'system-usage-label system-usage-field-icon',
             text: PANEL_TEMPERATURE_NORMAL_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -819,57 +812,71 @@ class SystemUsageIndicator extends PanelMenu.Button {
             x_align: Clutter.ActorAlign.START,
             y_align: Clutter.ActorAlign.CENTER,
         });
+        this._temperatureBox = this._createPanelField(
+            this._temperatureIconLabel, this._temperatureLabel);
         this._autoPowersaverIconLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-icon',
+            style_class: 'system-usage-label system-usage-field-icon',
             text: '!',
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._autoPowersaverTemperatureLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-number mini-font',
+            style_class: 'system-usage-label system-usage-number mini-font system-usage-temperature-value',
             text: '--°C',
             y_align: Clutter.ActorAlign.CENTER,
         });
+        this._autoPowersaverBox = this._createPanelField(
+            this._autoPowersaverIconLabel, this._autoPowersaverTemperatureLabel);
         this._fanIconLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-icon',
+            style_class: 'system-usage-label system-usage-field-icon',
             text: PANEL_FAN_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
-            visible: false,
         });
         this._fanSpeedLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-number mini-font',
+            style_class: 'system-usage-label system-usage-number mini-font system-usage-fan-speed',
             text: '',
             y_align: Clutter.ActorAlign.CENTER,
-            visible: false,
         });
+        this._fanBox = this._createPanelField(
+            this._fanIconLabel, this._fanSpeedLabel);
+        this._fanBox.visible = false;
         this._storagePanelLabels = STORAGE_FILESYSTEMS.map(() => {
             const iconLabel = new St.Label({
-                style_class: 'system-usage-label system-usage-icon',
+                style_class: 'system-usage-label system-usage-field-icon',
                 text: PANEL_FILESYSTEM_LABEL,
                 y_align: Clutter.ActorAlign.CENTER,
             });
             const percentLabel = new St.Label({
-                style_class: 'system-usage-label system-usage-number mini-font',
+                style_class: 'system-usage-label system-usage-number mini-font system-usage-percent',
                 text: '--%',
                 y_align: Clutter.ActorAlign.CENTER,
             });
 
-            return {iconLabel, percentLabel};
+            return {
+                iconLabel,
+                percentLabel,
+                box: this._createPanelField(iconLabel, percentLabel),
+            };
         });
     }
 
+    _createPanelField(iconLabel, valueLabel) {
+        const box = new St.BoxLayout({
+            style_class: 'system-usage-field',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+
+        box.add_child(iconLabel);
+        box.add_child(valueLabel);
+        return box;
+    }
+
     _addPanelWidgets() {
-        this._panelBox.add_child(this._fanIconLabel);
-        this._panelBox.add_child(this._fanSpeedLabel);
-        this._panelBox.add_child(this._memoryIconLabel);
-        this._panelBox.add_child(this._memoryPercentLabel);
-        for (const labels of this._storagePanelLabels) {
-            this._panelBox.add_child(labels.iconLabel);
-            this._panelBox.add_child(labels.percentLabel);
-        }
-        this._panelBox.add_child(this._autoPowersaverIconLabel);
-        this._panelBox.add_child(this._autoPowersaverTemperatureLabel);
-        this._panelBox.add_child(this._temperatureIconLabel);
-        this._panelBox.add_child(this._temperatureLabel);
+        this._panelBox.add_child(this._fanBox);
+        this._panelBox.add_child(this._memoryBox);
+        for (const labels of this._storagePanelLabels)
+            this._panelBox.add_child(labels.box);
+        this._panelBox.add_child(this._autoPowersaverBox);
+        this._panelBox.add_child(this._temperatureBox);
     }
 
     _createMetricMenuItems() {
@@ -1075,34 +1082,22 @@ class SystemUsageIndicator extends PanelMenu.Button {
         const showAutoPowersaver =
             this._settings.get_boolean(SHOW_AUTO_POWERSAVER_KEY);
 
-        this._setPanelLabelsVisible(
-            [this._memoryIconLabel, this._memoryPercentLabel], showMemory);
-        this._setPanelLabelsVisible(
-            [this._temperatureIconLabel, this._temperatureLabel], showTemperature);
-        this._setPanelLabelsVisible([
-            this._autoPowersaverIconLabel,
-            this._autoPowersaverTemperatureLabel,
-        ], showAutoPowersaver);
+        this._memoryBox.visible = showMemory;
+        this._temperatureBox.visible = showTemperature;
+        this._autoPowersaverBox.visible = showAutoPowersaver;
         this._autoPowersaverGpuItem.visible =
             this._settings.get_boolean(SHOW_AUTO_POWERSAVER_GPU_KEY);
 
         const showFan = this._settings.get_boolean(SHOW_FAN_KEY) &&
             this._fanSpeedLabel.text !== '';
-        this._setPanelLabelsVisible(
-            [this._fanIconLabel, this._fanSpeedLabel], showFan);
+        this._fanBox.visible = showFan;
 
         this._storagePanelLabels.forEach((labels, index) => {
             const visible = this._settings.get_boolean(
                 STORAGE_FILESYSTEMS[index].panelSettingKey);
 
-            this._setPanelLabelsVisible(
-                [labels.iconLabel, labels.percentLabel], visible);
+            labels.box.visible = visible;
         });
-    }
-
-    _setPanelLabelsVisible(labels, visible) {
-        for (const label of labels)
-            label.visible = visible;
     }
 
     _createStatusItem(label) {
@@ -1581,8 +1576,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._fanSpeedLabel.text = showFanOne ? _formatFanSpeed(fanOne.speed) : '';
         const showFanInPanel = showFanOne && this._settings.get_boolean(SHOW_FAN_KEY);
 
-        this._setPanelLabelsVisible(
-            [this._fanIconLabel, this._fanSpeedLabel], showFanInPanel);
+        this._fanBox.visible = showFanInPanel;
 
         if (showFanOne)
             this._fanItem.label.text = `${fanOne.name}: ${_formatFanSpeed(fanOne.speed)}`;
