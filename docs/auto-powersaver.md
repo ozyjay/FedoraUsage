@@ -27,27 +27,24 @@ status fields. A paused or manually overridden policy can therefore remain
 thermally hot or telemetry-degraded. Hot protection takes precedence over
 pause and manual Balanced requests.
 
-`enabled` remains in D-Bus and CLI status for compatibility and means only
-that ordinary automatic profile management is enabled. New clients should use
-the clearer `automatic_management_enabled`,
-`hot_protection_when_disabled` and `service_running` fields.
+`enabled`, `automatic_management_enabled` and
+`hot_protection_when_disabled` remain in D-Bus and CLI status for compatibility.
+New clients should use the three-value `operating_mode` field and the separate
+`service_running` field.
 
-## Automatic management versus hot protection
+## Operating modes
 
-| Automatic management | Hot protection while off | Result |
-| --- | ---: | --- |
-| On | On | Balanced while cool; Power Saver when hot |
-| Off | On | Current/manual profile retained while cool; Power Saver forced when hot |
-| Off | Off | FedoraUsage does not automatically change profiles |
-| On | Off | Protection-while-off setting is inactive while automatic management is on |
+| Operating mode | Result |
+| --- | --- |
+| Automatic | Balanced while cool; Power Saver when hot |
+| Hot protection only | Current/manual profile retained while cool; Power Saver forced when hot |
+| Off | FedoraUsage does not automatically change profiles |
 
-Turning off **Automatically manage power profile** disables ordinary
-Balanced-while-cool and Power-Saver-while-hot management. It leaves the current
-profile unchanged unless the explicit safe Balanced option is used. By
-default, hot protection remains active and may still select `powersave` at the
-hot threshold. Turning that additional safeguard off requires a separate
-warning and authorised request; it does not affect independent hardware or
-firmware protections and it does not stop the service.
+The GNOME UI exposes only these three behaviours. Selecting Off requires a
+warning and authorised request. It does not affect independent hardware or
+firmware protections and does not stop the service. The two legacy booleans and
+their D-Bus methods remain available so existing installations and clients
+continue to work.
 
 ## Policy behaviour
 
@@ -128,6 +125,9 @@ The CLI uses the same D-Bus contract as the GNOME UI and returns JSON:
 
 ```bash
 fedorausage auto-powersaver status
+fedorausage auto-powersaver mode automatic
+fedorausage auto-powersaver mode protection-only
+fedorausage auto-powersaver mode off
 fedorausage auto-powersaver enable
 fedorausage auto-powersaver disable
 fedorausage auto-powersaver disable --balanced
@@ -145,9 +145,8 @@ fedorausage auto-powersaver history --limit 20
 fedorausage auto-powersaver conflicts
 ```
 
-`disable` means disable ordinary automatic management; hot protection remains
-active unless separately disabled. `disable-policy` deliberately disables both
-policy behaviours but keeps the root service running. Neither command stops
+`mode` is the preferred interface. The older `enable`, `disable`, `protection`
+and `disable-policy` commands remain for compatibility. No mode stops
 `tuned.service` or the FedoraUsage service. `--balanced` is rejected while hot,
 or when telemetry is unknown or stale.
 
@@ -251,10 +250,10 @@ Sensor-loss tests require controlled hardware or a test service instance with
 fake `hwmon` data. Do not unbind production kernel drivers merely to simulate a
 missing sensor. Confirm one-sensor degraded and no-sensor unknown states in the
 fake integration environment. Finish by restoring the initial thresholds,
-enabled state and active profile, then append a final status and a written list
-of every restoration action to the audit.
+operating mode and active profile, then append a final status and a written
+list of every restoration action to the audit.
 
-The manual script also captures automatic management and hot protection
-separately, exercises disabled-but-protecting behaviour, restores the original
-protection value and records a conflict scan. It never creates a real competing
+The manual script also captures the legacy automatic-management and
+hot-protection fields, exercises Hot Protection Only behaviour, restores the
+original values and records a conflict scan. It never creates a real competing
 controller; use a fake integration environment for that case.

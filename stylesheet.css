@@ -18,6 +18,12 @@
   min-width: 2.5em;
 }
 
+/* The sensor name is capped at 14 characters and temperatures at three digits. */
+.system-usage-label.system-usage-hottest-temperature {
+  width: 14em;
+  text-align: left;
+}
+
 .system-usage-normal .system-usage-label {
   color: #ffffff;
 }

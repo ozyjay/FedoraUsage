@@ -110,6 +110,11 @@ INTROSPECTION_XML = f'''<node>
       <arg name="enabled" type="b" direction="in"/>
       <arg name="status_json" type="s" direction="out"/>
     </method>
+    <method name="SetOperatingMode">
+      <arg name="mode" type="s" direction="in"/>
+      <arg name="restore_balanced" type="b" direction="in"/>
+      <arg name="status_json" type="s" direction="out"/>
+    </method>
     <method name="DisablePolicy">
       <arg name="restore_balanced" type="b" direction="in"/>
       <arg name="status_json" type="s" direction="out"/>
@@ -550,6 +555,9 @@ class AutoPowersaverService:
             elif method_name == 'SetHotProtectionWhenDisabled':
                 enabled, = parameters.unpack()
                 self._controller.set_hot_protection_when_disabled(enabled)
+            elif method_name == 'SetOperatingMode':
+                mode, restore_balanced = parameters.unpack()
+                self._controller.set_operating_mode(mode, restore_balanced)
             elif method_name == 'DisablePolicy':
                 restore_balanced, = parameters.unpack()
                 self._controller.disable(restore_balanced)

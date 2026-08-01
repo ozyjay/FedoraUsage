@@ -47,9 +47,16 @@ def _parser() -> argparse.ArgumentParser:
     features = parser.add_subparsers(dest='feature', required=True)
     auto = features.add_parser(
         'auto-powersaver',
-        help='Manage automatic power profiles and independent hot protection')
+        help='Manage the temperature-based power profile policy')
     commands = auto.add_subparsers(dest='command', required=True)
     commands.add_parser('status')
+    mode = commands.add_parser(
+        'mode', help='Select Automatic, Hot Protection Only or Off')
+    mode.add_argument(
+        'operating_mode', choices=('automatic', 'protection-only', 'off'))
+    mode.add_argument(
+        '--balanced', action='store_true',
+        help='switch to Balanced only when telemetry is valid and thermally safe')
     commands.add_parser('enable', help='Enable ordinary automatic profile management')
     disable = commands.add_parser(
         'disable',
@@ -116,6 +123,15 @@ def main() -> int:
         command = arguments.command
         if command == 'status':
             result = _call(proxy, 'GetStatus', None)
+        elif command == 'mode':
+            result = _call(
+                proxy,
+                'SetOperatingMode',
+                GLib.Variant(
+                    '(sb)',
+                    (arguments.operating_mode.replace('-', '_'), arguments.balanced),
+                ),
+            )
         elif command == 'enable':
             result = _call(proxy, 'Enable', None)
         elif command == 'disable':

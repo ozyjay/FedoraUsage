@@ -80,6 +80,11 @@ const AUTO_REASON_LABELS = {
     tuned_unavailable: 'TuneD unavailable',
     starting: 'Starting',
 };
+const AUTO_OPERATING_MODE_LABELS = {
+    automatic: 'Automatic',
+    protection_only: 'Hot protection only',
+    off: 'Off',
+};
 
 const STORAGE_FILESYSTEMS = [
     {
@@ -760,10 +765,21 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverProxySignalId = 0;
         this._autoPowersaverCancellable = new Gio.Cancellable();
         this._autoPowersaverStatus = null;
-        this._updatingAutoPowersaverSwitch = false;
         this._lastAutoPowersaverNotificationAt = 0;
         this._lastPotentialControllerCount = 0;
 
+        this._connectSecondaryClick();
+        this._createPanelWidgets();
+        this._addPanelWidgets();
+
+        this._createMetricMenuItems();
+        this._createAutoPowersaverMenu();
+        this._connectMenuActions();
+        this._connectSettings();
+        this._startUpdates();
+    }
+
+    _connectSecondaryClick() {
         // PanelMenu.Button handles pointer input through this gesture, before
         // legacy button events reach the actor.
         this._clickGesture.connect('recognize', () => {
@@ -773,7 +789,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this.menu.close();
             this._openPreferences();
         });
+    }
 
+    _createPanelWidgets() {
         this._panelBox = new St.BoxLayout({
             style_class: 'system-usage-panel',
             y_align: Clutter.ActorAlign.CENTER,
@@ -790,24 +808,17 @@ class SystemUsageIndicator extends PanelMenu.Button {
             text: '--%',
             y_align: Clutter.ActorAlign.CENTER,
         });
-
-        this._panelBox.add_child(this._memoryIconLabel);
-        this._panelBox.add_child(this._memoryPercentLabel);
-
         this._temperatureIconLabel = new St.Label({
             style_class: 'system-usage-label system-usage-icon',
             text: PANEL_TEMPERATURE_NORMAL_LABEL,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._temperatureLabel = new St.Label({
-            style_class: 'system-usage-label system-usage-number mini-font',
+            style_class: 'system-usage-label system-usage-number mini-font system-usage-hottest-temperature',
             text: '--°C',
+            x_align: Clutter.ActorAlign.START,
             y_align: Clutter.ActorAlign.CENTER,
         });
-
-        this._panelBox.add_child(this._temperatureIconLabel);
-        this._panelBox.add_child(this._temperatureLabel);
-
         this._autoPowersaverIconLabel = new St.Label({
             style_class: 'system-usage-label system-usage-icon',
             text: '!',
@@ -818,9 +829,6 @@ class SystemUsageIndicator extends PanelMenu.Button {
             text: '--°C',
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._panelBox.add_child(this._autoPowersaverIconLabel);
-        this._panelBox.add_child(this._autoPowersaverTemperatureLabel);
-
         this._fanIconLabel = new St.Label({
             style_class: 'system-usage-label system-usage-icon',
             text: PANEL_FAN_LABEL,
@@ -833,10 +841,6 @@ class SystemUsageIndicator extends PanelMenu.Button {
             y_align: Clutter.ActorAlign.CENTER,
             visible: false,
         });
-
-        this._panelBox.add_child(this._fanIconLabel);
-        this._panelBox.add_child(this._fanSpeedLabel);
-
         this._storagePanelLabels = STORAGE_FILESYSTEMS.map(() => {
             const iconLabel = new St.Label({
                 style_class: 'system-usage-label system-usage-icon',
@@ -849,12 +853,26 @@ class SystemUsageIndicator extends PanelMenu.Button {
                 y_align: Clutter.ActorAlign.CENTER,
             });
 
-            this._panelBox.add_child(iconLabel);
-            this._panelBox.add_child(percentLabel);
-
             return {iconLabel, percentLabel};
         });
+    }
 
+    _addPanelWidgets() {
+        this._panelBox.add_child(this._fanIconLabel);
+        this._panelBox.add_child(this._fanSpeedLabel);
+        this._panelBox.add_child(this._memoryIconLabel);
+        this._panelBox.add_child(this._memoryPercentLabel);
+        for (const labels of this._storagePanelLabels) {
+            this._panelBox.add_child(labels.iconLabel);
+            this._panelBox.add_child(labels.percentLabel);
+        }
+        this._panelBox.add_child(this._autoPowersaverIconLabel);
+        this._panelBox.add_child(this._autoPowersaverTemperatureLabel);
+        this._panelBox.add_child(this._temperatureIconLabel);
+        this._panelBox.add_child(this._temperatureLabel);
+    }
+
+    _createMetricMenuItems() {
         this._ramItem = new PopupMenu.PopupMenuItem('RAM: --', {
             reactive: false,
             can_focus: false,
@@ -879,20 +897,14 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._fanItem);
         for (const item of this._storageItems)
             this.menu.addMenuItem(item);
+    }
 
+    _createAutoPowersaverMenu() {
         this._autoPowersaverSeparator = new PopupMenu.PopupSeparatorMenuItem();
-        this._autoPowersaverSwitch = new PopupMenu.PopupSwitchMenuItem(
-            'Automatically manage power profile', false);
-        this._autoPowersaverProtectionItem =
-            this._createStatusItem('Thermal protection while off');
-        this._autoPowersaverProtectionExplanationItem =
-            new PopupMenu.PopupMenuItem(
-                'Automatic management is off; hot protection remains active.', {
-                    reactive: false,
-                    can_focus: false,
-                });
+        this._autoPowersaverOperatingModeItem =
+            this._createStatusItem('Operating mode');
         this._autoPowersaverServiceItem = this._createStatusItem('Root service');
-        this._autoPowersaverModeItem = this._createStatusItem('Mode');
+        this._autoPowersaverModeItem = this._createStatusItem('Runtime state');
         this._autoPowersaverThermalItem = this._createStatusItem('Thermal state');
         this._autoPowersaverTelemetryItem = this._createStatusItem('Telemetry quality');
         this._autoPowersaverHealthItem = this._createStatusItem('Service health');
@@ -919,7 +931,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverAutomaticItem =
             new PopupMenu.PopupMenuItem('Return to Automatic');
         this._autoPowersaverDisableBalancedItem =
-            new PopupMenu.PopupMenuItem('Disable and switch to Balanced');
+            new PopupMenu.PopupMenuItem(
+                'Use Hot Protection Only and switch to Balanced');
         this._autoPowersaverHistorySubMenu =
             new PopupMenu.PopupSubMenuMenuItem('Recent activity');
         this._autoPowersaverHistoryItems = [];
@@ -934,9 +947,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverDetailsSubMenu =
             new PopupMenu.PopupSubMenuMenuItem('Auto-Powersaver details');
         for (const item of [
-            this._autoPowersaverProtectionItem,
-            this._autoPowersaverProtectionExplanationItem,
             this._autoPowersaverServiceItem,
+            this._autoPowersaverModeItem,
             this._autoPowersaverTelemetryItem,
             this._autoPowersaverHealthItem,
             this._autoPowersaverTctlItem,
@@ -966,8 +978,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         for (const item of [
             this._autoPowersaverSeparator,
-            this._autoPowersaverSwitch,
-            this._autoPowersaverModeItem,
+            this._autoPowersaverOperatingModeItem,
             this._autoPowersaverThermalItem,
             this._autoPowersaverControlTemperatureItem,
             this._autoPowersaverProfileItem,
@@ -977,22 +988,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._autoPowersaverSettingsItem,
         ])
             this.menu.addMenuItem(item);
+    }
 
-        this._autoPowersaverSwitch.connect('toggled', (_item, state) => {
-            if (this._updatingAutoPowersaverSwitch)
-                return;
-            this._callAutoPowersaver(
-                state ? 'Enable' : 'Disable',
-                state
-                    ? null
-                    : new GLib.Variant('(b)', [
-                        this._autoPowersaverStatus?.disable_behavior === 'balanced' &&
-                        !this._autoPowersaverStatus?.hot_latched &&
-                        this._autoPowersaverStatus?.control_temperature_c !== null &&
-                        this._autoPowersaverStatus?.telemetry_age_seconds <=
-                            this._autoPowersaverStatus?.poll_interval_seconds * 2,
-                    ]));
-        });
+    _connectMenuActions() {
         this._autoPowersaverPause15Item.connect(
             'activate', () => this._callAutoPowersaver(
                 'Pause', new GLib.Variant('(u)', [15 * 60])));
@@ -1011,7 +1009,8 @@ class SystemUsageIndicator extends PanelMenu.Button {
             'activate', () => this._callAutoPowersaver('ReturnToAutomatic'));
         this._autoPowersaverDisableBalancedItem.connect(
             'activate', () => this._callAutoPowersaver(
-                'Disable', new GLib.Variant('(b)', [true])));
+                'SetOperatingMode',
+                new GLib.Variant('(sb)', ['protection_only', true])));
         this._autoPowersaverSettingsItem.connect(
             'activate', () => this._openPreferences());
         this._autoPowersaverHistorySubMenu.menu.connect(
@@ -1019,7 +1018,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
                 if (open)
                     this._refreshAutoPowersaverHistory();
             });
+    }
 
+    _connectSettings() {
         for (const key of [
             SHOW_MEMORY_KEY,
             SHOW_TEMPERATURE_KEY,
@@ -1033,7 +1034,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
                 `changed::${key}`,
                 () => this._applyPanelVisibility()));
         }
+    }
 
+    _startUpdates() {
         this._applyPanelVisibility();
         this._setAutoPowersaverUnavailable();
         this._connectAutoPowersaver();
@@ -1098,11 +1101,6 @@ class SystemUsageIndicator extends PanelMenu.Button {
     }
 
     _setPanelLabelsVisible(labels, visible) {
-        if (visible && labels.some(label => !label.visible)) {
-            for (let index = labels.length - 1; index >= 0; index--)
-                this._panelBox.set_child_at_index(labels[index], 0);
-        }
-
         for (const label of labels)
             label.visible = visible;
     }
@@ -1220,6 +1218,10 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
     _applyAutoPowersaverStatus(status) {
         this._autoPowersaverStatus = status;
+        const operatingMode = status.operating_mode ?? (
+            status.enabled
+                ? 'automatic'
+                : status.hot_protection_when_disabled ? 'protection_only' : 'off');
         const mode = AUTO_POLICY_LABELS[status.policy_mode] ?? status.policy_mode;
         const thermal = AUTO_THERMAL_LABELS[status.thermal_state] ??
             status.thermal_state;
@@ -1229,16 +1231,10 @@ class SystemUsageIndicator extends PanelMenu.Button {
             ? 'Unavailable'
             : _formatTemperature(status.control_temperature_c);
 
-        this._updatingAutoPowersaverSwitch = true;
-        this._autoPowersaverSwitch.setToggleState(Boolean(status.enabled));
-        this._updatingAutoPowersaverSwitch = false;
-        this._autoPowersaverSwitch.setSensitive(true);
-        this._autoPowersaverProtectionItem.label.text =
-            `Thermal protection while off: ${status.hot_protection_when_disabled ? 'Enabled' : 'Disabled'}`;
-        this._autoPowersaverProtectionExplanationItem.visible =
-            !status.automatic_management_enabled && status.hot_protection_when_disabled;
+        this._autoPowersaverOperatingModeItem.label.text =
+            `Operating mode: ${AUTO_OPERATING_MODE_LABELS[operatingMode] ?? operatingMode}`;
         this._autoPowersaverServiceItem.label.text = 'Root service: Running';
-        this._autoPowersaverModeItem.label.text = `Mode: ${mode}`;
+        this._autoPowersaverModeItem.label.text = `Runtime state: ${mode}`;
         this._autoPowersaverThermalItem.label.text = `Thermal state: ${thermal}`;
         this._autoPowersaverTelemetryItem.label.text =
             `Telemetry quality: ${status.telemetry_quality.replace(/_/g, ' ')}`;
@@ -1325,7 +1321,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
             const minutes = Math.max(1, Math.ceil(status.paused_seconds_remaining / 60));
 
             this._autoPowersaverModeItem.label.text =
-                `Mode: Paused — ${minutes} min remaining`;
+                `Runtime state: Paused — ${minutes} min remaining`;
         } else if (
             status.policy_mode === 'manual_override' &&
             status.manual_override_seconds_remaining !== null
@@ -1334,7 +1330,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
                 1, Math.ceil(status.manual_override_seconds_remaining / 60));
 
             this._autoPowersaverModeItem.label.text =
-                `Mode: Manual override — ${minutes} min remaining`;
+                `Runtime state: Manual override — ${minutes} min remaining`;
         }
     }
 
@@ -1343,14 +1339,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverIconLabel.text = '!';
         this._autoPowersaverTemperatureLabel.text = '--°C';
         this._setAutoPowersaverVisualState('fault');
-        this._updatingAutoPowersaverSwitch = true;
-        this._autoPowersaverSwitch.setToggleState(false);
-        this._updatingAutoPowersaverSwitch = false;
-        this._autoPowersaverSwitch.setSensitive(false);
-        this._autoPowersaverModeItem.label.text = 'Mode: Unavailable';
-        this._autoPowersaverProtectionItem.label.text =
-            'Thermal protection while off: Unavailable';
-        this._autoPowersaverProtectionExplanationItem.visible = false;
+        this._autoPowersaverOperatingModeItem.label.text =
+            'Operating mode: Unavailable';
+        this._autoPowersaverModeItem.label.text = 'Runtime state: Unavailable';
         this._autoPowersaverServiceItem.label.text = 'Root service: Unavailable';
         this._autoPowersaverThermalItem.label.text = 'Thermal state: Unknown';
         this._autoPowersaverTelemetryItem.label.text = 'Telemetry quality: Unknown';

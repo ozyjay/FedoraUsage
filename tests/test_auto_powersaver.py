@@ -250,6 +250,39 @@ class PolicyControllerTests(unittest.TestCase):
         self.assertEqual(self.tuned.requests, [])
         self.assertFalse(self.controller.status()['hot_protection_when_disabled'])
 
+    def test_operating_modes_map_to_three_distinct_behaviours(self) -> None:
+        self.observe(60, 61)
+        self.assertEqual(self.controller.status()['operating_mode'], 'automatic')
+
+        self.controller.set_operating_mode('protection_only')
+        status = self.controller.status()
+        self.assertEqual(status['operating_mode'], 'protection_only')
+        self.assertFalse(status['automatic_management_enabled'])
+        self.assertTrue(status['hot_protection_when_disabled'])
+        self.observe(83, 80)
+        self.assertEqual(self.tuned.profile, 'powersave')
+
+        request_count = len(self.tuned.requests)
+        self.controller.set_operating_mode('off')
+        status = self.controller.status()
+        self.assertEqual(status['operating_mode'], 'off')
+        self.assertFalse(status['automatic_management_enabled'])
+        self.assertFalse(status['hot_protection_when_disabled'])
+        self.observe(84, 81)
+        self.assertEqual(len(self.tuned.requests), request_count)
+
+    def test_automatic_mode_canonicalises_legacy_protection_setting(self) -> None:
+        controller = PolicyController(
+            replace(self.config, hot_protection_when_disabled=False),
+            self.tuned,
+            now=self.clock,
+        )
+        controller.observe(readings(60, 61), self.tuned.profile)
+        controller.set_operating_mode('automatic')
+        self.assertTrue(controller.status()['hot_protection_when_disabled'])
+        with self.assertRaises(PolicyError):
+            controller.set_operating_mode('unsupported')
+
     def test_enabling_protection_while_disabled_and_hot_is_immediate(self) -> None:
         controller = PolicyController(
             replace(self.config, enabled=False, hot_protection_when_disabled=False),
@@ -415,28 +448,45 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn('recovery', completed.stderr)
 
-    def test_cli_help_distinguishes_ordinary_and_complete_disable(self) -> None:
+    def test_cli_help_exposes_three_operating_modes(self) -> None:
         completed = subprocess.run(
             [sys.executable, 'bin/fedorausage', 'auto-powersaver', '--help'],
             capture_output=True, text=True, check=False)
         self.assertEqual(completed.returncode, 0)
-        self.assertIn(
-            'hot protection remains active', ' '.join(completed.stdout.split()))
+        self.assertIn('mode', completed.stdout)
         self.assertIn('disable-policy', completed.stdout)
         self.assertIn('conflicts', completed.stdout)
 
-    def test_dbus_and_gnome_clients_expose_independent_dimensions(self) -> None:
+    def test_dbus_and_gnome_clients_expose_operating_modes(self) -> None:
         service_source = Path('auto_powersaver/service.py').read_text(encoding='utf-8')
         preferences_source = Path('prefs.js').read_text(encoding='utf-8')
         extension_source = Path('extension.js').read_text(encoding='utf-8')
+        self.assertIn('SetOperatingMode', service_source)
         self.assertIn('SetHotProtectionWhenDisabled', service_source)
         self.assertIn('GetConflictStatus', service_source)
         self.assertIn('RescanConflicts', service_source)
         for source in (preferences_source, extension_source):
-            self.assertIn('Automatically manage power profile', source)
-        self.assertIn('Hot protection while off', preferences_source)
-        self.assertIn('Thermal protection while off', extension_source)
+            self.assertIn('Operating mode', source)
+            self.assertIn('Hot protection only', source)
+        self.assertNotIn('Automatically manage power profile', preferences_source)
+        self.assertNotIn('Thermal protection while off', extension_source)
         self.assertIn('Hot protection selected Power Saver', extension_source)
+
+    def test_panel_readings_have_a_stable_order_and_temperature_width(self) -> None:
+        extension_source = Path('extension.js').read_text(encoding='utf-8')
+        stylesheet_source = Path('stylesheet.css').read_text(encoding='utf-8')
+        ordered_additions = [
+            'this._panelBox.add_child(this._fanIconLabel);',
+            'this._panelBox.add_child(this._memoryIconLabel);',
+            'this._panelBox.add_child(labels.iconLabel);',
+            'this._panelBox.add_child(this._autoPowersaverIconLabel);',
+            'this._panelBox.add_child(this._temperatureIconLabel);',
+        ]
+        positions = [extension_source.index(line) for line in ordered_additions]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn('set_child_at_index', extension_source)
+        self.assertIn('system-usage-hottest-temperature', stylesheet_source)
+        self.assertIn('text-align: left', stylesheet_source)
 
     def test_privilege_policy_xml_is_well_formed(self) -> None:
         for path in [

@@ -16,6 +16,7 @@ import uuid
 
 
 ALLOWED_PROFILES = frozenset({'balanced', 'powersave'})
+OPERATING_MODES = frozenset({'automatic', 'protection_only', 'off'})
 CONTROL_SENSORS = ('k10temp/Tctl', 'cros_ec/cpu@4c')
 DIAGNOSTIC_SENSOR = 'amdgpu/edge'
 MINIMUM_TEMPERATURE_C = -20.0
@@ -142,6 +143,14 @@ class PolicyController:
     @property
     def enabled(self) -> bool:
         return self.config.enabled
+
+    @property
+    def operating_mode(self) -> str:
+        if self.config.enabled:
+            return 'automatic'
+        if self.config.hot_protection_when_disabled:
+            return 'protection_only'
+        return 'off'
 
     def replace_config(self, config: Config) -> None:
         config.validate()
@@ -472,6 +481,55 @@ class PolicyController:
                 'safety',
             )
 
+    def set_operating_mode(
+        self, mode: str, restore_balanced: bool = False,
+    ) -> None:
+        if mode not in OPERATING_MODES:
+            raise PolicyError(
+                'operating mode must be automatic, protection_only or off')
+        if restore_balanced and (self.hot_latched or self.control_temperature_c is None):
+            raise PolicyError('Balanced cannot be selected while hot or telemetry is unavailable')
+        if (
+            restore_balanced and
+            (self._last_observed_at is None or
+             self._now() - self._last_observed_at > self.config.poll_interval_seconds * 2)
+        ):
+            raise PolicyError('Balanced cannot be selected while telemetry is stale')
+
+        before_mode = self.policy_mode
+        self.config = Config(**{
+            **asdict(self.config),
+            'enabled': mode == 'automatic',
+            'hot_protection_when_disabled': mode != 'off',
+        })
+        self.policy_mode = 'automatic' if mode == 'automatic' else 'disabled'
+        self.paused_until = None
+        self.paused_previous_mode = None
+        self.manual_override_until = None
+        self.manual_override_profile = None
+        self._record_event(
+            reason=f'operating_mode_{mode}',
+            source='user',
+            success=True,
+            policy_mode_before=before_mode,
+        )
+
+        if mode == 'automatic':
+            if self.hot_latched:
+                self._request_profile(
+                    self.config.hot_profile, 'automatic_hot', 'safety')
+            else:
+                self._apply_mode_profile(reason='automatic_normal', source='user')
+        elif mode == 'protection_only' and self.hot_latched and self.tuned_available:
+            self._request_profile(
+                self.config.hot_profile,
+                'hot_protection_while_disabled',
+                'safety',
+            )
+        elif restore_balanced:
+            self._request_profile(
+                self.config.normal_profile, 'forced_balanced', 'user')
+
     def pause(self, duration_seconds: int) -> None:
         if not self.config.enabled:
             raise PolicyError('Auto-Powersaver must be enabled before it can be paused')
@@ -639,6 +697,7 @@ class PolicyController:
             'enabled': self.config.enabled,
             'automatic_management_enabled': self.config.enabled,
             'hot_protection_when_disabled': self.config.hot_protection_when_disabled,
+            'operating_mode': self.operating_mode,
             'service_running': True,
             'policy_mode': self.policy_mode,
             'thermal_state': self.thermal_state,

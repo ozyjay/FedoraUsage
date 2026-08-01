@@ -16,6 +16,13 @@ const AUTO_POWERSAVER_BUS_NAME =
 const AUTO_POWERSAVER_OBJECT_PATH =
     '/net/crunchycodes/FedoraUsage/AutoPowersaver1';
 const AUTO_POWERSAVER_INTERFACE = AUTO_POWERSAVER_BUS_NAME;
+const AUTO_OPERATING_MODES = ['automatic', 'protection_only', 'off'];
+const AUTO_OPERATING_MODE_LABELS = ['Automatic', 'Hot protection only', 'Off'];
+const AUTO_OPERATING_MODE_DESCRIPTIONS = {
+    automatic: 'Use Balanced while cool and Power Saver when hot',
+    protection_only: 'Keep the current profile while cool and use Power Saver when hot',
+    off: 'Never change the power profile automatically',
+};
 const AUTO_REASON_LABELS = {
     automatic_normal: 'Automatic — cool',
     automatic_hot: 'Automatic — hot',
@@ -145,18 +152,11 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             title: 'Auto-Powersaver policy',
             description: 'Controls the root-owned system policy service through D-Bus. Changes may require administrator authentication.',
         });
-        const autoEnabledRow = new Adw.SwitchRow({
-            title: 'Automatically manage power profile',
-            subtitle: 'Use Balanced while cool and Power Saver when the hot threshold is reached',
+        const operatingModeRow = new Adw.ComboRow({
+            title: 'Operating mode',
+            subtitle: 'Choose when FedoraUsage changes the power profile',
+            model: Gtk.StringList.new(AUTO_OPERATING_MODE_LABELS),
             sensitive: false,
-        });
-        const hotProtectionRow = new Adw.SwitchRow({
-            title: 'Keep thermal protection active when automatic management is off',
-            subtitle: 'Power Saver may still be selected at the hot threshold when automatic management is disabled',
-            sensitive: false,
-        });
-        const protectionExplanationRow = new Adw.ActionRow({
-            title: 'Turning automatic management off does not disable hot protection unless the setting below is also turned off.',
         });
         const hotAdjustment = new Gtk.Adjustment({
             lower: 40,
@@ -238,7 +238,7 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         });
         const disableBehaviourRow = new Adw.ComboRow({
             title: 'Disable behaviour',
-            subtitle: 'Default action when ordinary automation is disabled',
+            subtitle: 'Profile action when leaving Automatic mode',
             model: Gtk.StringList.new(['Leave profile unchanged', 'Switch to Balanced']),
         });
         const applyPolicyRow = new Adw.ActionRow({
@@ -251,16 +251,6 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         });
         applyPolicyRow.add_suffix(applyPolicyButton);
         applyPolicyRow.activatable_widget = applyPolicyButton;
-        const disablePolicyRow = new Adw.ActionRow({
-            title: 'Disable automatic management and hot protection',
-            subtitle: 'Leaves the root service running and the current TuneD profile unchanged',
-        });
-        const disablePolicyButton = new Gtk.Button({
-            label: 'Disable both…',
-            valign: Gtk.Align.CENTER,
-        });
-        disablePolicyRow.add_suffix(disablePolicyButton);
-        disablePolicyRow.activatable_widget = disablePolicyButton;
         const showGpuRow = new Adw.SwitchRow({
             title: 'Show GPU temperature',
             subtitle: 'Display the diagnostic-only amdgpu edge reading in the menu',
@@ -277,9 +267,7 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT);
 
         for (const row of [
-            autoEnabledRow,
-            protectionExplanationRow,
-            hotProtectionRow,
+            operatingModeRow,
             hotRow,
             recoveryRow,
             dwellRow,
@@ -289,7 +277,6 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             degradedRow,
             disableBehaviourRow,
             applyPolicyRow,
-            disablePolicyRow,
             showGpuRow,
             notificationsRow,
         ])
@@ -300,10 +287,9 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             description: 'Live read-only state reported by the system service.',
         });
         const diagnosticRows = new Map([
-            ['automatic_management_enabled', new Adw.ActionRow({title: 'Automatic management', subtitle: 'Unavailable'})],
-            ['hot_protection_when_disabled', new Adw.ActionRow({title: 'Hot protection while off', subtitle: 'Unavailable'})],
+            ['operating_mode', new Adw.ActionRow({title: 'Operating mode', subtitle: 'Unavailable'})],
             ['service_running', new Adw.ActionRow({title: 'Root service', subtitle: 'Unavailable'})],
-            ['policy_mode', new Adw.ActionRow({title: 'Policy mode', subtitle: 'Unavailable'})],
+            ['policy_mode', new Adw.ActionRow({title: 'Runtime state', subtitle: 'Unavailable'})],
             ['thermal_state', new Adw.ActionRow({title: 'Thermal state', subtitle: 'Unknown'})],
             ['telemetry_quality', new Adw.ActionRow({title: 'Control sensor health', subtitle: 'Unknown'})],
             ['service_health', new Adw.ActionRow({title: 'Service health', subtitle: 'Service unavailable'})],
@@ -353,6 +339,10 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         let updatingAutoRows = false;
         let currentAutoStatus = null;
         let policyRowsDirty = false;
+        const operatingModeFromStatus = status => status?.operating_mode ?? (
+            status?.enabled
+                ? 'automatic'
+                : status?.hot_protection_when_disabled ? 'protection_only' : 'off');
         const markPolicyRowsDirty = () => {
             if (updatingAutoRows)
                 return;
@@ -374,17 +364,20 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
 
         const setPolicySensitive = sensitive => {
             for (const row of [
-                autoEnabledRow, hotProtectionRow, hotRow, recoveryRow, dwellRow, readingCountRow,
+                operatingModeRow, hotRow, recoveryRow, dwellRow, readingCountRow,
                 pollRow, overrideRow, degradedRow, disableBehaviourRow,
-                applyPolicyRow, disablePolicyRow,
+                applyPolicyRow,
             ])
                 row.sensitive = sensitive;
         };
         const applyStatus = status => {
             currentAutoStatus = status;
             updatingAutoRows = true;
-            autoEnabledRow.active = Boolean(status.enabled);
-            hotProtectionRow.active = Boolean(status.hot_protection_when_disabled);
+            const operatingMode = operatingModeFromStatus(status);
+            operatingModeRow.selected = Math.max(
+                AUTO_OPERATING_MODES.indexOf(operatingMode), 0);
+            operatingModeRow.subtitle =
+                AUTO_OPERATING_MODE_DESCRIPTIONS[operatingMode] ?? 'Unknown mode';
             if (!policyRowsDirty) {
                 hotAdjustment.value = status.hot_threshold_c;
                 recoveryAdjustment.value = status.recovery_threshold_c;
@@ -400,10 +393,9 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             updatingAutoRows = false;
             setPolicySensitive(true);
 
-            diagnosticRows.get('automatic_management_enabled').subtitle =
-                status.automatic_management_enabled ? 'On' : 'Off';
-            diagnosticRows.get('hot_protection_when_disabled').subtitle =
-                status.hot_protection_when_disabled ? 'On' : 'Off';
+            diagnosticRows.get('operating_mode').subtitle =
+                AUTO_OPERATING_MODE_LABELS[
+                    Math.max(AUTO_OPERATING_MODES.indexOf(operatingMode), 0)];
             diagnosticRows.get('service_running').subtitle =
                 status.service_running ? 'Running' : 'Unavailable';
 
@@ -463,62 +455,42 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
                 });
         };
 
-        autoEnabledRow.connect('notify::active', () => {
+        const restoreBalancedWhenSafe = () =>
+            currentAutoStatus?.disable_behavior === 'balanced' &&
+            !currentAutoStatus?.hot_latched &&
+            currentAutoStatus?.control_temperature_c !== null &&
+            currentAutoStatus?.telemetry_age_seconds <=
+                currentAutoStatus?.poll_interval_seconds * 2;
+        const setOperatingMode = mode => callService(
+            'SetOperatingMode',
+            new GLib.Variant('(sb)', [mode, restoreBalancedWhenSafe()]));
+
+        operatingModeRow.connect('notify::selected', () => {
             if (updatingAutoRows)
                 return;
-            callService(
-                autoEnabledRow.active ? 'Enable' : 'Disable',
-                autoEnabledRow.active
-                    ? null
-                    : new GLib.Variant('(b)', [
-                        currentAutoStatus?.disable_behavior === 'balanced' &&
-                        !currentAutoStatus?.hot_latched &&
-                        currentAutoStatus?.control_temperature_c !== null &&
-                        currentAutoStatus?.telemetry_age_seconds <=
-                            currentAutoStatus?.poll_interval_seconds * 2,
-                    ]));
-        });
-        hotProtectionRow.connect('notify::active', () => {
-            if (updatingAutoRows)
-                return;
-            if (hotProtectionRow.active) {
-                callService(
-                    'SetHotProtectionWhenDisabled',
-                    new GLib.Variant('(b)', [true]));
+            const mode = AUTO_OPERATING_MODES[operatingModeRow.selected];
+
+            if (mode !== 'off') {
+                setOperatingMode(mode);
                 return;
             }
             updatingAutoRows = true;
-            hotProtectionRow.active = true;
+            operatingModeRow.selected = Math.max(
+                AUTO_OPERATING_MODES.indexOf(
+                    operatingModeFromStatus(currentAutoStatus)), 0);
             updatingAutoRows = false;
             const dialog = new Adw.AlertDialog({
-                heading: 'Disable thermal protection?',
-                body: 'Disabling thermal protection means FedoraUsage will no longer switch to Power Saver when the configured hot threshold is reached while automatic management is off. Hardware and firmware protections remain independent, but FedoraUsage will stop providing this additional safeguard.',
+                heading: 'Turn Auto-Powersaver off?',
+                body: 'FedoraUsage will stop changing power profiles, including at the hot threshold. Hardware and firmware thermal protections remain independent, and the root service will keep running for status and diagnostics.',
             });
             dialog.add_response('cancel', 'Cancel');
-            dialog.add_response('disable', 'Disable protection');
-            dialog.set_response_appearance('disable', Adw.ResponseAppearance.DESTRUCTIVE);
+            dialog.add_response('turn-off', 'Turn off');
+            dialog.set_response_appearance('turn-off', Adw.ResponseAppearance.DESTRUCTIVE);
             dialog.set_default_response('cancel');
             dialog.set_close_response('cancel');
             dialog.choose(window, null, (_dialog, result) => {
-                if (dialog.choose_finish(result) === 'disable')
-                    callService(
-                        'SetHotProtectionWhenDisabled',
-                        new GLib.Variant('(b)', [false]));
-            });
-        });
-        disablePolicyButton.connect('clicked', () => {
-            const dialog = new Adw.AlertDialog({
-                heading: 'Disable both policy behaviours?',
-                body: 'FedoraUsage will stop automatically changing profiles, including at the hot threshold. The root service will keep running for status, diagnostics and future re-enablement.',
-            });
-            dialog.add_response('cancel', 'Cancel');
-            dialog.add_response('disable', 'Disable both');
-            dialog.set_response_appearance('disable', Adw.ResponseAppearance.DESTRUCTIVE);
-            dialog.set_default_response('cancel');
-            dialog.set_close_response('cancel');
-            dialog.choose(window, null, (_dialog, result) => {
-                if (dialog.choose_finish(result) === 'disable')
-                    callService('DisablePolicy', new GLib.Variant('(b)', [false]));
+                if (dialog.choose_finish(result) === 'turn-off')
+                    setOperatingMode('off');
             });
         });
         const applyConflictStatus = conflict => {

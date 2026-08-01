@@ -47,8 +47,8 @@ Framework Computer Inc.
   `balanced` only after validated hysteresis, dwell and consecutive readings.
 - Keeps hot protection active during pause and manual override, and respects
   external TuneD changes as temporary manual overrides while safely cool.
-- Separately reports ordinary automatic management, hot protection while it is
-  off, root-service availability, external profile changes and potential
+- Reports the three Auto-Powersaver operating modes, root-service availability,
+  external profile changes and potential
   competing controllers. Conflict scans distinguish system and user unit state,
   ignore non-script binaries and report when a bounded location was truncated.
 
@@ -67,29 +67,26 @@ The service is designed for Framework Desktop with `k10temp/Tctl` and
 `cros_ec/cpu@4c` control sensors, Fedora TuneD and `tuned-ppd`. It chooses only
 the standard `balanced` and `powersave` profiles. Missing telemetry is never
 treated as a cool system. All user-requested system policy changes pass through
-a narrow D-Bus API and Polkit authorisation. Policy fields in the extension
-preferences are saved together with the **Apply** button. Live service updates
-continue to refresh diagnostics without replacing policy edits that have not
-yet been applied.
+a narrow D-Bus API and Polkit authorisation. Thresholds and advanced policy
+options in the extension preferences are saved together with the **Apply**
+button. Live service updates continue to refresh diagnostics without replacing
+policy edits that have not yet been applied.
 
-### Automatic management versus hot protection
+### Operating modes
 
 Auto-Powersaver is a FedoraUsage policy, not a TuneD profile. GNOME Settings
 shows only its underlying `balanced` or `powersave` profile. The root service
-can provide status, diagnostics, history and hot protection even when ordinary
-automatic management is off.
+can provide status, diagnostics and history in every operating mode.
 
-| Automatic management | Hot protection while off | Result |
-| --- | ---: | --- |
-| On | On | Balanced while cool; Power Saver when hot |
-| Off | On | Current or manual profile retained while cool; Power Saver forced when hot |
-| Off | Off | FedoraUsage does not automatically change profiles |
-| On | Off | Protection-while-off setting is inactive while automatic management is on |
+| Operating mode | Result |
+| --- | --- |
+| Automatic | Balanced while cool; Power Saver when hot |
+| Hot protection only | Current or manual profile retained while cool; Power Saver forced when hot |
+| Off | FedoraUsage does not automatically change profiles |
 
-The safe default is to keep hot protection enabled. Turning it off is a
-separate, warned and Polkit-authorised operation in Preferences or the CLI.
-Turning ordinary management off does not stop the service. Administrators can
-stop it separately with:
+Automatic is the default. Selecting Off requires confirmation and does not
+disable independent hardware or firmware thermal protection. Changing modes
+does not stop the root service. Administrators can stop it separately with:
 
 ```bash
 sudo systemctl disable --now fedorausage-auto-powersaver.service
