@@ -12,6 +12,20 @@
   spacing: 0.2em;
 }
 
+.system-usage-tabs {
+  spacing: 0.35em;
+}
+
+.system-usage-tab {
+  padding: 0.45em 0.8em;
+  border-radius: 0.5em;
+}
+
+.system-usage-tab:checked {
+  background-color: rgba(255, 255, 255, 0.14);
+  font-weight: 600;
+}
+
 .system-usage-temperature-field {
   spacing: 0;
 }

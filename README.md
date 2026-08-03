@@ -42,8 +42,8 @@ Framework Computer Inc.
   `/mnt/work`.
 - Shows warning colour at 70% and critical colour at 90% for memory or storage,
   and at 75°C and 90°C for temperature.
-- Integrates an Auto-Powersaver summary, with diagnostics, safe controls and
-  bounded transition history available in collapsed submenus.
+- Organises the indicator popup into System, Power and Activity tabs, with
+  Auto-Powersaver diagnostics, safe controls and bounded transition history.
 - Selects TuneD `powersave` immediately at the hot threshold and returns to
   `balanced` only after validated hysteresis, dwell and consecutive readings.
 - Keeps hot protection active during pause and manual override, and respects

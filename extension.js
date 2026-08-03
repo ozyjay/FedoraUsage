@@ -763,6 +763,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
 
         this._createMetricMenuItems();
         this._createAutoPowersaverMenu();
+        this._createTabbedMenu();
         this._connectMenuActions();
         this._connectSettings();
         this._startUpdates();
@@ -900,16 +901,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
                 reactive: false,
                 can_focus: false,
             }));
-
-        this.menu.addMenuItem(this._fanItem);
-        this.menu.addMenuItem(this._ramItem);
-        for (const item of this._storageItems)
-            this.menu.addMenuItem(item);
-        this.menu.addMenuItem(this._temperatureItem);
     }
 
     _createAutoPowersaverMenu() {
-        this._autoPowersaverSeparator = new PopupMenu.PopupSeparatorMenuItem();
         this._autoPowersaverOperatingModeItem =
             this._createStatusItem('Operating mode');
         this._autoPowersaverServiceItem = this._createStatusItem('Root service');
@@ -939,12 +933,14 @@ class SystemUsageIndicator extends PanelMenu.Button {
             new PopupMenu.PopupMenuItem('Force Balanced');
         this._autoPowersaverAutomaticItem =
             new PopupMenu.PopupMenuItem('Return to Automatic');
-        this._autoPowersaverDisableBalancedItem =
-            new PopupMenu.PopupMenuItem(
-                'Use Hot Protection Only and switch to Balanced');
-        this._autoPowersaverHistorySubMenu =
-            new PopupMenu.PopupSubMenuMenuItem('Recent activity');
-        this._autoPowersaverHistoryItems = [];
+        this._autoPowersaverProtectionOnlyItem =
+            new PopupMenu.PopupMenuItem('Use Hot Protection Only');
+        this._autoPowersaverHistoryItems = [
+            new PopupMenu.PopupMenuItem('Loading recent activity…', {
+                reactive: false,
+                can_focus: false,
+            }),
+        ];
         this._autoPowersaverInfoItem = new PopupMenu.PopupMenuItem(
             'Changes the Fedora system-wide TuneD profile.', {
                 reactive: false,
@@ -981,22 +977,86 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._autoPowersaverForceSaverItem,
             this._autoPowersaverForceBalancedItem,
             this._autoPowersaverAutomaticItem,
-            this._autoPowersaverDisableBalancedItem,
+            this._autoPowersaverProtectionOnlyItem,
         ])
             this._autoPowersaverActionsSubMenu.menu.addMenuItem(item);
+    }
 
+    _createTabbedMenu() {
+        this._menuTabItem = new PopupMenu.PopupBaseMenuItem({
+            reactive: false,
+            can_focus: false,
+        });
+        const tabBox = new St.BoxLayout({
+            style_class: 'system-usage-tabs',
+            x_expand: true,
+        });
+        this._menuTabItem.add_child(tabBox);
+
+        this._menuSections = new Map([
+            ['system', new PopupMenu.PopupMenuSection()],
+            ['power', new PopupMenu.PopupMenuSection()],
+            ['activity', new PopupMenu.PopupMenuSection()],
+        ]);
+        this._menuTabButtons = new Map();
+        for (const [name, label] of [
+            ['system', 'System'],
+            ['power', 'Power'],
+            ['activity', 'Activity'],
+        ]) {
+            const button = new St.Button({
+                label,
+                style_class: 'system-usage-tab',
+                can_focus: true,
+                toggle_mode: true,
+                x_expand: true,
+            });
+            button.connect('clicked', () => this._selectMenuTab(name));
+            this._menuTabButtons.set(name, button);
+            tabBox.add_child(button);
+        }
+
+        const systemSection = this._menuSections.get('system');
         for (const item of [
-            this._autoPowersaverSeparator,
+            this._fanItem,
+            this._ramItem,
+            ...this._storageItems,
+            this._temperatureItem,
+        ])
+            systemSection.addMenuItem(item);
+
+        const powerSection = this._menuSections.get('power');
+        for (const item of [
             this._autoPowersaverOperatingModeItem,
             this._autoPowersaverThermalItem,
             this._autoPowersaverControlTemperatureItem,
             this._autoPowersaverProfileItem,
             this._autoPowersaverDetailsSubMenu,
             this._autoPowersaverActionsSubMenu,
-            this._autoPowersaverHistorySubMenu,
             this._autoPowersaverSettingsItem,
         ])
-            this.menu.addMenuItem(item);
+            powerSection.addMenuItem(item);
+
+        this._autoPowersaverHistorySection =
+            this._menuSections.get('activity');
+        for (const item of this._autoPowersaverHistoryItems)
+            this._autoPowersaverHistorySection.addMenuItem(item);
+        this.menu.addMenuItem(this._menuTabItem);
+        for (const section of this._menuSections.values())
+            this.menu.addMenuItem(section);
+        this._selectMenuTab('system');
+    }
+
+    _selectMenuTab(selectedName) {
+        for (const [name, section] of this._menuSections) {
+            const selected = name === selectedName;
+
+            section.actor.visible = selected;
+            this._menuTabButtons.get(name).checked = selected;
+        }
+
+        if (selectedName === 'activity')
+            this._refreshAutoPowersaverHistory();
     }
 
     _connectMenuActions() {
@@ -1015,18 +1075,15 @@ class SystemUsageIndicator extends PanelMenu.Button {
             'activate', () => this._callAutoPowersaver(
                 'ForceProfile', new GLib.Variant('(s)', ['balanced'])));
         this._autoPowersaverAutomaticItem.connect(
-            'activate', () => this._callAutoPowersaver('ReturnToAutomatic'));
-        this._autoPowersaverDisableBalancedItem.connect(
             'activate', () => this._callAutoPowersaver(
                 'SetOperatingMode',
-                new GLib.Variant('(sb)', ['protection_only', true])));
+                new GLib.Variant('(sb)', ['automatic', false])));
+        this._autoPowersaverProtectionOnlyItem.connect(
+            'activate', () => this._callAutoPowersaver(
+                'SetOperatingMode',
+                new GLib.Variant('(sb)', ['protection_only', false])));
         this._autoPowersaverSettingsItem.connect(
             'activate', () => this._openPreferences());
-        this._autoPowersaverHistorySubMenu.menu.connect(
-            'open-state-changed', (_menu, open) => {
-                if (open)
-                    this._refreshAutoPowersaverHistory();
-            });
     }
 
     _connectSettings() {
@@ -1292,8 +1349,9 @@ class SystemUsageIndicator extends PanelMenu.Button {
         this._autoPowersaverForceSaverItem.setSensitive(canMutateProfile);
         this._autoPowersaverForceBalancedItem.setSensitive(canSelectBalanced);
         this._autoPowersaverAutomaticItem.setSensitive(
-            enabled && status.policy_mode !== 'automatic');
-        this._autoPowersaverDisableBalancedItem.setSensitive(canSelectBalanced);
+            operatingMode !== 'automatic');
+        this._autoPowersaverProtectionOnlyItem.setSensitive(
+            operatingMode !== 'protection_only');
 
         if (status.policy_mode === 'paused' && status.paused_seconds_remaining !== null) {
             const minutes = Math.max(1, Math.ceil(status.paused_seconds_remaining / 60));
@@ -1335,7 +1393,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
             this._autoPowersaverForceSaverItem,
             this._autoPowersaverForceBalancedItem,
             this._autoPowersaverAutomaticItem,
-            this._autoPowersaverDisableBalancedItem,
+            this._autoPowersaverProtectionOnlyItem,
         ])
             item.setSensitive(false);
     }
@@ -1407,7 +1465,7 @@ class SystemUsageIndicator extends PanelMenu.Button {
                 can_focus: false,
             })];
         this._autoPowersaverHistoryItems.forEach(item =>
-            this._autoPowersaverHistorySubMenu.menu.addMenuItem(item));
+            this._autoPowersaverHistorySection.addMenuItem(item));
     }
 
     _notifyAutoPowersaverTransition(transition) {

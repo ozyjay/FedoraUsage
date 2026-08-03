@@ -471,6 +471,18 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertNotIn('Automatically manage power profile', preferences_source)
         self.assertNotIn('Thermal protection while off', extension_source)
         self.assertIn('Hot protection selected Power Saver', extension_source)
+        self.assertIn("['automatic', false]", extension_source)
+        self.assertIn("['protection_only', false]", extension_source)
+
+    def test_indicator_popup_uses_system_power_and_activity_tabs(self) -> None:
+        extension_source = Path('extension.js').read_text(encoding='utf-8')
+        stylesheet_source = Path('stylesheet.css').read_text(encoding='utf-8')
+
+        self.assertIn("['system', 'System']", extension_source)
+        self.assertIn("['power', 'Power']", extension_source)
+        self.assertIn("['activity', 'Activity']", extension_source)
+        self.assertIn("this._selectMenuTab('system')", extension_source)
+        self.assertIn('.system-usage-tab:checked', stylesheet_source)
 
     def test_panel_readings_have_stable_order_and_compact_fields(self) -> None:
         extension_source = Path('extension.js').read_text(encoding='utf-8')
@@ -486,15 +498,14 @@ class ConfigurationFileTests(unittest.TestCase):
         ]
         positions = [extension_source.index(line) for line in ordered_additions]
         self.assertEqual(positions, sorted(positions))
-        ordered_menu_additions = [
-            'this.menu.addMenuItem(this._fanItem);',
-            'this.menu.addMenuItem(this._ramItem);',
-            'this.menu.addMenuItem(item);',
-            'this.menu.addMenuItem(this._temperatureItem);',
+        ordered_menu_items = [
+            'this._fanItem,',
+            'this._ramItem,',
+            '...this._storageItems,',
+            'this._temperatureItem,',
         ]
-        menu_positions = [
-            extension_source.index(line) for line in ordered_menu_additions
-        ]
+        menu_positions = [extension_source.index(line)
+                          for line in ordered_menu_items]
         self.assertEqual(menu_positions, sorted(menu_positions))
         self.assertNotIn('set_child_at_index', extension_source)
         self.assertIn('system-usage-hottest-temperature', stylesheet_source)
