@@ -484,6 +484,15 @@ class ConfigurationFileTests(unittest.TestCase):
         self.assertIn("this._selectMenuTab('system')", extension_source)
         self.assertIn('.system-usage-tab:checked', stylesheet_source)
 
+    def test_preferences_use_general_policy_and_diagnostics_tabs(self) -> None:
+        preferences_source = Path('prefs.js').read_text(encoding='utf-8')
+
+        for title in ('General', 'Auto-Powersaver', 'Diagnostics'):
+            self.assertIn(f"title: '{title}'", preferences_source)
+        self.assertIn('window.add(generalPage)', preferences_source)
+        self.assertIn('window.add(autoPowersaverPage)', preferences_source)
+        self.assertIn('window.add(diagnosticsPage)', preferences_source)
+
     def test_panel_readings_have_stable_order_and_compact_fields(self) -> None:
         extension_source = Path('extension.js').read_text(encoding='utf-8')
         presentation_source = Path('panelPresentation.js').read_text(

@@ -57,9 +57,9 @@ const RETENTION_UNIT_MAXIMUMS = {
 export default class SystemUsagePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
-        const page = new Adw.PreferencesPage({
-            title: 'System Usage Monitor',
-            icon_name: 'utilities-system-monitor-symbolic',
+        const generalPage = new Adw.PreferencesPage({
+            title: 'General',
+            icon_name: 'preferences-system-symbolic',
         });
         const panelGroup = new Adw.PreferencesGroup({
             title: 'Top bar',
@@ -144,9 +144,14 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         group.add(historyRow);
         group.add(retentionRow);
         group.add(retentionUnitRow);
-        page.add(panelGroup);
-        page.add(storageGroup);
-        page.add(group);
+        generalPage.add(panelGroup);
+        generalPage.add(storageGroup);
+        generalPage.add(group);
+
+        const autoPowersaverPage = new Adw.PreferencesPage({
+            title: 'Auto-Powersaver',
+            icon_name: 'battery-symbolic',
+        });
 
         const autoGroup = new Adw.PreferencesGroup({
             title: 'Auto-Powersaver policy',
@@ -301,8 +306,13 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
         ]);
         for (const row of diagnosticRows.values())
             diagnosticsGroup.add(row);
-        page.add(autoGroup);
-        page.add(diagnosticsGroup);
+        autoPowersaverPage.add(autoGroup);
+
+        const diagnosticsPage = new Adw.PreferencesPage({
+            title: 'Diagnostics',
+            icon_name: 'utilities-system-monitor-symbolic',
+        });
+        diagnosticsPage.add(diagnosticsGroup);
 
         const externalGroup = new Adw.PreferencesGroup({
             title: 'External-control diagnostics',
@@ -333,7 +343,7 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
             conflictDetailsRow,
         ])
             externalGroup.add(row);
-        page.add(externalGroup);
+        diagnosticsPage.add(externalGroup);
 
         let autoProxy = null;
         let updatingAutoRows = false;
@@ -592,6 +602,8 @@ export default class SystemUsagePreferences extends ExtensionPreferences {
                     setPolicySensitive(false);
                 }
             });
-        window.add(page);
+        window.add(generalPage);
+        window.add(autoPowersaverPage);
+        window.add(diagnosticsPage);
     }
 }

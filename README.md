@@ -35,8 +35,9 @@ Framework Computer Inc.
 - Records a timestamped sensor snapshot every two seconds in JSON Lines format.
 - Keeps sensor history for a configurable number of minutes, hours or days in
   `~/System Usage Logs/`.
-- Provides preferences for top-bar readings, the secondary SSD location and
-  sensor history.
+- Organises preferences into General, Auto-Powersaver and Diagnostics tabs.
+  General contains top-bar readings, the secondary SSD location and sensor
+  history.
 - Uses GNOME filesystem statistics for the system filesystem mounted at `/`.
 - Monitors a secondary SSD at a configurable mount location, defaulting to
   `/mnt/work`.
